@@ -1,4 +1,10 @@
-import { getBackendServices, postDeployApp, putApp } from '@/api/app';
+import {
+  getBackendServices,
+  getNetworkIsolation,
+  postDeployApp,
+  putApp,
+  putNetworkIsolation
+} from '@/api/app';
 import {
   checkCustomDomainCertificateCoverage,
   checkPermission,
@@ -15,6 +21,7 @@ import { useGlobalStore } from '@/store/global';
 import {
   CUSTOM_DOMAIN_MODE,
   CUSTOM_PUBLIC_DOMAIN_PREFIX_ENABLED,
+  NETWORK_ISOLATION_ENABLED,
   SEALOS_DOMAIN
 } from '@/store/static';
 import { useUserStore } from '@/store/user';
@@ -25,6 +32,7 @@ import type {
   AppPatchPropsType,
   DeployKindsType
 } from '@/types/app';
+import type { NetworkIsolationConfig } from '@/types/networkIsolation';
 import { adaptEditAppData, YamlKindEnum } from '@/utils/adapt';
 import type { V1OwnerReference } from '@kubernetes/client-node';
 import {
@@ -63,10 +71,13 @@ import {
 } from '@/utils/public-domain';
 import { getCustomDomainBindings } from '@/utils/custom-domain';
 import { rebindMainServiceRoutes } from '@/utils/network-routes';
+import { APP_NAME_BASE_MAX_LENGTH, getInvalidNameMessageI18nKey } from '@/utils/appNameValidation';
 import {
-  APP_NAME_BASE_MAX_LENGTH,
-  getInvalidNameMessageI18nKey
-} from '@/utils/appNameValidation';
+  createAppWithNetworkIsolation,
+  NetworkIsolationAfterCreateError,
+  NetworkIsolationAfterUpdateError,
+  syncExistingAppNetworkIsolation
+} from '@/utils/create-app-network-isolation';
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz', 12);
 
@@ -287,6 +298,9 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
   const [confirmContent, setConfirmContent] = useState(applyMessage);
   const [errorMessage, setErrorMessage] = useState('');
   const [errorCode, setErrorCode] = useState<ResponseCode>();
+  const [networkIsolationDraft, setNetworkIsolationDraft] = useState<NetworkIsolationConfig>();
+  const [createdAppPendingIsolation, setCreatedAppPendingIsolation] = useState<string>();
+  const [updatedAppPendingIsolation, setUpdatedAppPendingIsolation] = useState<string>();
   const [already, setAlready] = useState(false);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   // For identifying existing stores and quota calculation
@@ -324,8 +338,8 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
               result.status === 'pendingSync'
                 ? ('certificate_domain_pending_sync' as const)
                 : result.status === 'unsupported'
-                  ? ('certificate_domain_unsupported' as const)
-                  : ('certificate_domain_not_configured' as const)
+                ? ('certificate_domain_unsupported' as const)
+                : ('certificate_domain_not_configured' as const)
           };
         } catch (error) {
           return {
@@ -432,8 +446,30 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
             appName,
             stateFulSetYaml: yamlList.find((item) => item.filename === 'statefulset.yaml')?.value
           });
+          if (NETWORK_ISOLATION_ENABLED) {
+            try {
+              await syncExistingAppNetworkIsolation(appName, {
+                getNetworkIsolation,
+                putNetworkIsolation
+              });
+            } catch (error) {
+              throw new NetworkIsolationAfterUpdateError(appName, error);
+            }
+          }
         } else {
-          await postDeployApp(parsedNewYamlList);
+          const targetAppName = formHook.getValues('appName');
+          await createAppWithNetworkIsolation(
+            {
+              appName: targetAppName,
+              yamlList: parsedNewYamlList,
+              config: networkIsolationDraft
+            },
+            {
+              deployApp: postDeployApp,
+              getNetworkIsolation,
+              putNetworkIsolation
+            }
+          );
         }
 
         router.replace(`/app/detail?name=${formHook.getValues('appName')}`);
@@ -447,7 +483,17 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
           refetchPrice();
         }
       } catch (error: any) {
-        if (error?.code === ResponseCode.BALANCE_NOT_ENOUGH) {
+        if (error instanceof NetworkIsolationAfterCreateError) {
+          setCreatedAppPendingIsolation(error.appName);
+          setErrorMessage(
+            `${t('network_isolation_create_partial_failure')} ${getErrText(error.cause)}`
+          );
+        } else if (error instanceof NetworkIsolationAfterUpdateError) {
+          setUpdatedAppPendingIsolation(error.appName);
+          setErrorMessage(
+            `${t('network_isolation_update_partial_failure')} ${getErrText(error.cause)}`
+          );
+        } else if (error?.code === ResponseCode.BALANCE_NOT_ENOUGH) {
           setErrorMessage(t('user_balance_not_enough'));
           setErrorCode(ResponseCode.BALANCE_NOT_ENOUGH);
 
@@ -510,9 +556,64 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
       applySuccess,
       userSourcePrice?.gpu,
       refetchPrice,
-      createCompleted
+      createCompleted,
+      networkIsolationDraft
     ]
   );
+
+  const retryCreatedAppNetworkIsolation = useCallback(async () => {
+    if (!createdAppPendingIsolation || !networkIsolationDraft) return;
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      await createAppWithNetworkIsolation(
+        {
+          appName: createdAppPendingIsolation,
+          yamlList: [],
+          config: networkIsolationDraft,
+          appAlreadyCreated: true
+        },
+        {
+          deployApp: postDeployApp,
+          getNetworkIsolation,
+          putNetworkIsolation
+        }
+      );
+      router.replace(`/app/detail?name=${createdAppPendingIsolation}`);
+      toast({ title: t(applySuccess), status: 'success' });
+    } catch (error) {
+      const cause = error instanceof NetworkIsolationAfterCreateError ? error.cause : error;
+      setErrorMessage(`${t('network_isolation_create_partial_failure')} ${getErrText(cause)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [
+    applySuccess,
+    createdAppPendingIsolation,
+    networkIsolationDraft,
+    router,
+    setIsLoading,
+    t,
+    toast
+  ]);
+
+  const retryUpdatedAppNetworkIsolation = useCallback(async () => {
+    if (!updatedAppPendingIsolation) return;
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      await syncExistingAppNetworkIsolation(updatedAppPendingIsolation, {
+        getNetworkIsolation,
+        putNetworkIsolation
+      });
+      router.replace(`/app/detail?name=${updatedAppPendingIsolation}`);
+      toast({ title: t(applySuccess), status: 'success' });
+    } catch (error) {
+      setErrorMessage(`${t('network_isolation_update_partial_failure')} ${getErrText(error)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [applySuccess, router, setIsLoading, t, toast, updatedAppPendingIsolation]);
 
   const submitError = useCallback<SubmitErrorHandler<AppEditType>>(
     (errors) => {
@@ -796,8 +897,20 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
           title={title}
           yamlList={yamlList}
           getFormData={() => realTimeForm.current}
-          applyBtnText={applyBtnText}
+          applyBtnText={
+            createdAppPendingIsolation || updatedAppPendingIsolation
+              ? 'network_isolation_retry_sync'
+              : applyBtnText
+          }
           applyCb={() => {
+            if (createdAppPendingIsolation) {
+              void retryCreatedAppNetworkIsolation();
+              return;
+            }
+            if (updatedAppPendingIsolation) {
+              void retryUpdatedAppNetworkIsolation();
+              return;
+            }
             formHook.handleSubmit(async (data) => {
               console.log('data', data);
 
@@ -912,10 +1025,10 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
                         customDomain: invalidCustomDomain.customDomain
                       })
                     : invalidCustomDomain.reason === 'certificate_domain_unsupported'
-                      ? t('custom_domain_certificate_unavailable')
-                      : t('custom_domain_certificate_not_configured', {
-                          customDomain: invalidCustomDomain.customDomain
-                        });
+                    ? t('custom_domain_certificate_unavailable')
+                    : t('custom_domain_certificate_not_configured', {
+                        customDomain: invalidCustomDomain.customDomain
+                      });
 
                 return toast({
                   status: 'warning',
@@ -976,8 +1089,8 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
                             data.hpa.target === 'cpu'
                               ? 'CPU'
                               : data.hpa.target === 'gpu'
-                                ? 'GPU'
-                                : 'RAM',
+                              ? 'GPU'
+                              : 'RAM',
                           value: data.hpa.value
                         }
                       : undefined
@@ -1000,6 +1113,10 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
               refresh={forceUpdate}
               isAdvancedOpen={isAdvancedOpen}
               onDomainVerified={handleDomainVerified}
+              networkIsolationDraft={networkIsolationDraft}
+              onNetworkIsolationDraftChange={setNetworkIsolationDraft}
+              isWorkloadLocked={!!createdAppPendingIsolation || !!updatedAppPendingIsolation}
+              editAppName={appName}
             />
           ) : (
             <Yaml yamlList={yamlList} pxVal={pxVal} />

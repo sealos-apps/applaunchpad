@@ -257,13 +257,10 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
       ? {
           [`${data.gpu.manufacturers}.com/use-gputype`]: data.gpu.type
         }
-      : supportedGpuManufacturers.reduce(
-          (acc, manufacturer) => {
-            acc[`${manufacturer}.com/use-gputype`] = null;
-            return acc;
-          },
-          {} as Record<string, null>
-        );
+      : supportedGpuManufacturers.reduce((acc, manufacturer) => {
+          acc[`${manufacturer}.com/use-gputype`] = null;
+          return acc;
+        }, {} as Record<string, null>);
 
   const metadata = {
     name: data.appName,
@@ -647,7 +644,9 @@ export const json2Service = (
       ...(ownerReferences ? { ownerReferences } : {})
     },
     spec: {
-      type: 'NodePort',
+      type: 'LoadBalancer',
+      allocateLoadBalancerNodePorts: true,
+      externalTrafficPolicy: 'Local',
       ports: openPublicPorts,
       selector: {
         app: data.appName

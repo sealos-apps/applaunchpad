@@ -16,6 +16,7 @@ import {
 import { useUserStore } from '@/store/user';
 import type { QueryType } from '@/types';
 import { type AppEditType } from '@/types/app';
+import type { NetworkIsolationConfig } from '@/types/networkIsolation';
 import { sliderNumber2MarkList } from '@/utils/adapt';
 import { InfoOutlineIcon } from '@chakra-ui/icons';
 import {
@@ -113,7 +114,11 @@ const Form = ({
   pxVal,
   refresh,
   isAdvancedOpen,
-  onDomainVerified
+  onDomainVerified,
+  networkIsolationDraft,
+  onNetworkIsolationDraftChange,
+  isWorkloadLocked,
+  editAppName
 }: {
   formHook: UseFormReturn<AppEditType, any>;
   already: boolean;
@@ -123,6 +128,10 @@ const Form = ({
   refresh: boolean;
   isAdvancedOpen: boolean;
   onDomainVerified?: (params: { index: number; customDomain: string }) => void;
+  networkIsolationDraft?: NetworkIsolationConfig;
+  onNetworkIsolationDraftChange?: (config: NetworkIsolationConfig) => void;
+  isWorkloadLocked?: boolean;
+  editAppName?: string;
 }) => {
   if (!formHook) return null;
   const { t, i18n } = useTranslation();
@@ -130,9 +139,9 @@ const Form = ({
   const { userSourcePrice } = useUserStore();
   const router = useRouter();
   const { toast } = useToast();
-  const { name } = router.query as QueryType;
+  const { name: routeName } = router.query as QueryType;
   const theme = useTheme();
-  const isEdit = useMemo(() => !!name, [name]);
+  const isEdit = !!editAppName;
 
   const {
     register,
@@ -560,14 +569,14 @@ const Form = ({
     const sortedCpuList = !!gpuType
       ? cpuList
       : cpu !== undefined
-        ? [...new Set([...cpuList, cpu])].sort((a, b) => a - b)
-        : cpuList;
+      ? [...new Set([...cpuList, cpu])].sort((a, b) => a - b)
+      : cpuList;
 
     const sortedMemoryList = !!gpuType
       ? memoryList
       : memory !== undefined
-        ? [...new Set([...memoryList, memory])].sort((a, b) => a - b)
-        : memoryList;
+      ? [...new Set([...memoryList, memory])].sort((a, b) => a - b)
+      : memoryList;
 
     const sortedEphemeralStorageList =
       ephemeralStorage !== undefined
@@ -638,7 +647,7 @@ const Form = ({
             onChange={() =>
               router.replace(
                 `/app/edit?${obj2Query({
-                  name,
+                  name: routeName,
                   type: 'yaml'
                 })}`
               )
@@ -724,7 +733,12 @@ const Form = ({
           // overflowY={'scroll'}
         >
           {/* base info */}
-          <Box id={'baseInfo'} {...boxStyles}>
+          <Box
+            id={'baseInfo'}
+            {...boxStyles}
+            pointerEvents={isWorkloadLocked ? 'none' : 'auto'}
+            opacity={isWorkloadLocked ? 0.65 : 1}
+          >
             <Box {...headerStyles}>
               <MyIcon name={'formInfo'} mr={'12px'} w={'24px'} color={'grayModern.900'} />
               {t('Basic Config')}
@@ -1181,6 +1195,11 @@ const Form = ({
 
           <NetworkSection
             formHook={formHook}
+            appName={editAppName || getValues('appName')}
+            isEdit={isEdit}
+            isWorkloadLocked={isWorkloadLocked}
+            createDraft={networkIsolationDraft}
+            onCreateDraftChange={onNetworkIsolationDraftChange}
             onDomainVerified={onDomainVerified}
             boxStyles={boxStyles}
             headerStyles={headerStyles}
@@ -1190,6 +1209,8 @@ const Form = ({
             <Accordion
               pb={'100px'}
               id={'settings'}
+              pointerEvents={isWorkloadLocked ? 'none' : 'auto'}
+              opacity={isWorkloadLocked ? 0.65 : 1}
               allowToggle
               index={isAdvancedOpen || navList[2].isSetting ? 0 : undefined}
             >
@@ -1336,8 +1357,8 @@ const Form = ({
                             const valText = env.value
                               ? env.value
                               : env.valueFrom
-                                ? 'value from | ***'
-                                : '';
+                              ? 'value from | ***'
+                              : '';
                             return (
                               <tr key={env.id}>
                                 <th>{env.key}</th>

@@ -1,12 +1,11 @@
+// @vitest-environment node
 import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { describe, expect, it } from 'vitest';
 
 describe('EditApp yaml display state', () => {
   it('keeps custom-domain verification yaml display masked while caching raw yaml', () => {
-    const source = readFileSync(
-      new URL('../../../../../src/pages/app/edit/index.tsx', import.meta.url),
-      'utf8'
-    );
+    const source = readFileSync(resolve(process.cwd(), 'src/pages/app/edit/index.tsx'), 'utf8');
     const start = source.indexOf('const handleDomainVerified = useCallback');
     const end = source.indexOf('useQuery(', start);
 
@@ -29,16 +28,13 @@ describe('EditApp yaml display state', () => {
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(source.indexOf('removeStoreList(originalIndex)')).toBeGreaterThan(start);
-    expect(source).toContain('existingStores.some((store) => store.path === item.path)');
+    expect(source).toMatch(/existingStores\.some\(\s*\(store\) => store\.path === item\.path\s*\)/);
     expect(source).toContain("t('Store At Least One')");
     expect(source).not.toContain('localStores.length === 1');
   });
 
   it('creates the missing ClusterIP service before applying a custom-domain ingress', () => {
-    const source = readFileSync(
-      new URL('../../../../../src/pages/app/edit/index.tsx', import.meta.url),
-      'utf8'
-    );
+    const source = readFileSync(resolve(process.cwd(), 'src/pages/app/edit/index.tsx'), 'utf8');
     const start = source.indexOf('const handleDomainVerified = useCallback');
     const end = source.indexOf('useQuery(', start);
     const handleDomainVerified = source.slice(start, end);
@@ -60,9 +56,7 @@ describe('EditApp yaml display state', () => {
 
     expect(helperStart).toBeGreaterThanOrEqual(0);
     expect(helperEnd).toBeGreaterThan(helperStart);
-    expect(helper).toContain(
-      'network.openNodePort ? withoutMainServiceBinding(network) : network'
-    );
+    expect(helper).toContain('network.openNodePort ? withoutMainServiceBinding(network) : network');
     expect(source.match(/preserveClusterIpServiceBinding\(currentNetwork\)/g)).toHaveLength(3);
   });
 });

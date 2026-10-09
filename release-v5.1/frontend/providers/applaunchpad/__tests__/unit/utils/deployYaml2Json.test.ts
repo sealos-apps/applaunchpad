@@ -436,7 +436,7 @@ describe('json2Service', () => {
     expect(objects[0].metadata.name).toMatch(/^app-111111hello-world-nodeport-[a-z]{12}$/);
   });
 
-  it('renders application-protocol IP:port access as a NodePort service', () => {
+  it('renders application-protocol IP:port access as a source-range-capable service', () => {
     const app = createApp();
     app.networks[0] = {
       ...app.networks[0],
@@ -451,7 +451,11 @@ describe('json2Service', () => {
     const objects = yamlString2Objects(json2Service(app)) as any[];
 
     expect(objects).toHaveLength(1);
-    expect(objects[0].spec.type).toBe('NodePort');
+    expect(objects[0].spec).toMatchObject({
+      type: 'LoadBalancer',
+      allocateLoadBalancerNodePorts: true,
+      externalTrafficPolicy: 'Local'
+    });
     expect(objects[0].spec.ports[0]).toMatchObject({
       port: 80,
       targetPort: 80,
