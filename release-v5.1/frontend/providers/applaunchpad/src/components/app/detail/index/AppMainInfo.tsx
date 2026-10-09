@@ -151,21 +151,19 @@ const AppMainInfo = ({ app = MOCK_APP_DETAIL }: { app: AppDetailType }) => {
       }
     },
     refetchIntervalInBackground: false,
-    staleTime: 1000 * 60 * 5
+    refetchOnMount: 'always',
+    staleTime: 0
   });
 
   const statusMap = useMemo(
     () =>
       networkStatus
-        ? networkStatus.reduce(
-            (acc, item) => {
-              if (item?.url) {
-                acc[item.url] = item;
-              }
-              return acc;
-            },
-            {} as Record<string, PublicAddressStatus>
-          )
+        ? networkStatus.reduce((acc, item) => {
+            if (item?.url) {
+              acc[item.url] = item;
+            }
+            return acc;
+          }, {} as Record<string, PublicAddressStatus>)
         : {},
     [networkStatus]
   );
