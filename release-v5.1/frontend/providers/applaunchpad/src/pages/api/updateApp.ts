@@ -8,7 +8,7 @@ import { PatchUtils } from '@kubernetes/client-node';
 import type { AppPatchPropsType } from '@/types/app';
 import { initK8s } from 'sealos-desktop-sdk/service';
 import { errLog, infoLog, warnLog } from 'sealos-desktop-sdk';
-import type { V1Service } from '@kubernetes/client-node';
+import type { V1OwnerReference, V1Service } from '@kubernetes/client-node';
 import { generateOwnerReference, shouldHaveOwnerReference } from '@/utils/deployYaml2Json';
 import { appDeployKey } from '@/constants/app';
 import { buildExternalUrl } from '@/utils/network-url';
@@ -67,6 +67,12 @@ type CreatePatchItem = Extract<AppPatchPropsType[number], { type: 'create' }>;
 type CreateResourceItem = {
   item: CreatePatchItem;
   resource: Record<string, any>;
+};
+
+type WorkloadKind = 'Deployment' | 'StatefulSet';
+type ResourceIdentity = {
+  kind: `${YamlKindEnum}`;
+  name: string;
 };
 
 const getK8sErrorCode = (error: any) =>
@@ -177,6 +183,14 @@ async function getWorkloadOwnerReferences({
       targetKind === 'Deployment'
         ? await k8sApp.readNamespacedDeployment(appName, namespace)
         : await k8sApp.readNamespacedStatefulSet(appName, namespace);
+    const instanceOwnerReference = workload.body.metadata?.ownerReferences?.find(
+      (ownerReference: V1OwnerReference) =>
+        ownerReference.apiVersion === 'app.sealos.io/v1' && ownerReference.kind === 'Instance'
+    );
+    if (instanceOwnerReference) {
+      return [instanceOwnerReference];
+    }
+
     const uid = workload.body.metadata?.uid;
     if (!uid) {
       throw new Error(`${targetKind} UID is empty`);
@@ -198,10 +212,24 @@ async function getWorkloadOwnerReferences({
   }
 }
 
-const withOwnerReferences = (
-  yamlStr: string,
-  ownerReferences: ReturnType<typeof generateOwnerReference>
-) => {
+const createK8sStatusError = (code: number, reason: string, message: string) => ({
+  body: {
+    apiVersion: 'v1',
+    kind: 'Status',
+    status: 'Failure',
+    code,
+    reason,
+    message
+  }
+});
+
+const hasInstanceOwnerReference = (ownerReferences?: V1OwnerReference[]) =>
+  ownerReferences?.some(
+    (ownerReference) =>
+      ownerReference.apiVersion === 'app.sealos.io/v1' && ownerReference.kind === 'Instance'
+  ) ?? false;
+
+const withOwnerReferences = (yamlStr: string, ownerReferences: V1OwnerReference[]) => {
   const resource = normalizeNetworkResource(yaml.load(yamlStr) as any);
   if (resource?.kind && shouldHaveOwnerReference(resource.kind)) {
     resource.metadata = resource.metadata || {};
@@ -229,7 +257,7 @@ async function patchExistingOwnerReferences({
   k8sCustomObjects: CustomObjectsApi;
   namespace: string;
   appName: string;
-  ownerReferences: ReturnType<typeof generateOwnerReference>;
+  ownerReferences: V1OwnerReference[];
 }) {
   const mergePatchOptions = {
     headers: { 'Content-type': PatchUtils.PATCH_FORMAT_JSON_MERGE_PATCH }
@@ -506,6 +534,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       `${YamlKindEnum}`,
       {
         patch: (jsonPatch: Object) => Promise<any>;
+        preflight?: (jsonPatch: Object) => Promise<any>;
         delete: (name: string) => Promise<any>;
       }
     > = {
@@ -522,11 +551,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
             undefined,
             { headers: { 'Content-type': PatchUtils.PATCH_FORMAT_JSON_MERGE_PATCH } }
           ),
+        preflight: (jsonPatch: Object) =>
+          k8sApp.patchNamespacedDeployment(
+            appName,
+            namespace,
+            jsonPatch,
+            undefined,
+            'All',
+            undefined,
+            undefined,
+            undefined,
+            { headers: { 'Content-type': PatchUtils.PATCH_FORMAT_JSON_MERGE_PATCH } }
+          ),
         delete: (name) => k8sApp.deleteNamespacedDeployment(name, namespace)
       },
       [YamlKindEnum.StatefulSet]: {
         patch: async (jsonPatch: Object) => {
-          // patch -> replace; fail closed if both fail
           try {
             await k8sApp.patchNamespacedStatefulSet(
               appName,
@@ -540,18 +580,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
               { headers: { 'Content-type': PatchUtils.PATCH_FORMAT_JSON_MERGE_PATCH } }
             );
             return { recreated: false, kind: YamlKindEnum.StatefulSet };
-          } catch (patchError) {
-            try {
-              await k8sApp.replaceNamespacedStatefulSet(appName, namespace, jsonPatch);
-              return { recreated: false, kind: YamlKindEnum.StatefulSet };
-            } catch (replaceError) {
-              warnLog('statefulSet patch/replace failed; not falling back to delete/create', {
-                yaml: yaml.dump(jsonPatch)
-              });
-              throw replaceError || patchError;
-            }
+          } catch (patchError: any) {
+            warnLog('StatefulSet patch failed; not falling back to replace or recreate', {
+              code: getK8sErrorCode(patchError),
+              message:
+                patchError?.body?.message ||
+                patchError?.response?.body?.message ||
+                patchError?.message
+            });
+            throw patchError;
           }
         },
+        preflight: (jsonPatch: Object) =>
+          k8sApp.patchNamespacedStatefulSet(
+            appName,
+            namespace,
+            jsonPatch,
+            undefined,
+            'All',
+            undefined,
+            undefined,
+            undefined,
+            { headers: { 'Content-type': PatchUtils.PATCH_FORMAT_JSON_MERGE_PATCH } }
+          ),
         delete: (name) => k8sApp.deleteNamespacedStatefulSet(name, namespace)
       },
       [YamlKindEnum.Service]: {
@@ -671,6 +722,70 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       }
     };
 
+    const normalizedPatch = await normalizeLegacyStatefulSetRecreatePatch({
+      patch,
+      k8sApp,
+      appName,
+      namespace
+    });
+    const patchItems = normalizedPatch.filter(
+      (item): item is Extract<AppPatchPropsType[number], { type: 'patch' }> => {
+        const cr = crMap[item.kind];
+        return !!cr && item.type === 'patch' && !!item.value?.metadata;
+      }
+    );
+    const recreateItems = normalizedPatch.filter(
+      (item): item is Extract<AppPatchPropsType[number], { type: 'recreate' }> =>
+        item.type === 'recreate' && item.kind === YamlKindEnum.StatefulSet
+    );
+    if (recreateItems.length > 1) {
+      throw new Error('Only one StatefulSet recreation can be requested at a time');
+    }
+    const workloadPatches = patchItems.filter((item) => isWorkloadKind(item.kind));
+    const regularPatches = patchItems.filter((item) => !isWorkloadKind(item.kind));
+    const serviceDeleteNames = new Set(
+      patch
+        .filter(
+          (item): item is Extract<AppPatchPropsType[number], { type: 'delete' }> =>
+            item.type === 'delete' && item.kind === YamlKindEnum.Service
+        )
+        .map((item) => item.name)
+    );
+    const statefulSetPatch = workloadPatches.find((item) => item.kind === YamlKindEnum.StatefulSet);
+    const currentStatefulSet =
+      statefulSetPatch || serviceDeleteNames.size > 0
+        ? await ignoreNotFound(k8sApp.readNamespacedStatefulSet(appName, namespace))
+        : undefined;
+    const currentStatefulSetServiceName = currentStatefulSet?.body.spec?.serviceName;
+
+    if (currentStatefulSetServiceName && serviceDeleteNames.has(currentStatefulSetServiceName)) {
+      throw createK8sStatusError(
+        422,
+        'Invalid',
+        `Service "${currentStatefulSetServiceName}" is the governing Service of StatefulSet "${appName}" and cannot be deleted`
+      );
+    }
+
+    // Validate the complete workload plan before applying PVC, dependency, or workload changes.
+    // Dry-run catches immutable fields and admission/RBAC failures without leaving partial state.
+    await Promise.all(
+      workloadPatches.map(async (item) => {
+        const cr = crMap[item.kind];
+        if (item.kind === YamlKindEnum.StatefulSet && item.value?.spec?.serviceName) {
+          const currentServiceName = currentStatefulSetServiceName;
+          const nextServiceName = item.value.spec.serviceName;
+          if (currentServiceName && currentServiceName !== nextServiceName) {
+            throw createK8sStatusError(
+              422,
+              'Invalid',
+              `StatefulSet spec.serviceName is immutable: cannot change "${currentServiceName}" to "${nextServiceName}"`
+            );
+          }
+        }
+        await cr.preflight?.(item.value);
+      })
+    );
+
     // update pvc data
     const stateFulSet = stateFulSetYaml ? (yaml.load(stateFulSetYaml) as V1StatefulSet) : {};
     // filer delete pvc
@@ -740,27 +855,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       })
     );
 
-    const normalizedPatch = await normalizeLegacyStatefulSetRecreatePatch({
-      patch,
-      k8sApp,
-      appName,
-      namespace
-    });
-    const patchItems = normalizedPatch.filter(
-      (item): item is Extract<AppPatchPropsType[number], { type: 'patch' }> => {
-        const cr = crMap[item.kind];
-        return !!cr && item.type === 'patch' && !!item.value?.metadata;
-      }
-    );
-    const recreateItems = normalizedPatch.filter(
-      (item): item is Extract<AppPatchPropsType[number], { type: 'recreate' }> =>
-        item.type === 'recreate' && item.kind === YamlKindEnum.StatefulSet
-    );
-    if (recreateItems.length > 1) {
-      throw new Error('Only one StatefulSet recreation can be requested at a time');
-    }
-    const workloadPatches = patchItems.filter((item) => isWorkloadKind(item.kind));
-    const regularPatches = patchItems.filter((item) => !isWorkloadKind(item.kind));
     const applyPatchItem = (
       item: Extract<AppPatchPropsType[number], { type: 'patch' }>
     ): Promise<any> | undefined => {
@@ -770,10 +864,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       infoLog('patch cr', { kind: item.kind, name: item.value?.metadata?.name });
       return cr.patch(item.value);
     };
-
-    // Patch ConfigMap/Service/etc. first. Workload patches can create fresh Pods, so run them
-    // after referenced resources are patched or created.
-    await Promise.all(regularPatches.map(applyPatchItem));
 
     // create
     const createItems = normalizedPatch
@@ -801,112 +891,182 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       normalizedPatch.some(
         (item) => item.type === 'delete' && isWorkloadKind(item.kind) && item.name === appName
       );
-    let createdWorkloadOwnerReferences: ReturnType<typeof generateOwnerReference> | undefined;
-
-    if (workloadCreateItems.length > 0) {
-      await applyYamlList(
-        workloadCreateItems.map(({ resource }) => yaml.dump(resource)),
-        'create'
-      );
-
-      const createdWorkloadKind = workloadCreateItems[0].resource.kind as
-        | 'Deployment'
-        | 'StatefulSet';
-      createdWorkloadOwnerReferences = await getWorkloadOwnerReferences({
-        k8sApp,
-        namespace,
-        appName,
-        kind: createdWorkloadKind
+    let createdWorkloadOwnerReferences: V1OwnerReference[] | undefined;
+    let currentWorkloadOwnerReferences: V1OwnerReference[] | undefined;
+    const createdResources: ResourceIdentity[] = [];
+    const rememberCreatedResources = (items: CreateResourceItem[]) => {
+      items.forEach(({ resource }) => {
+        if (resource.kind && resource.metadata?.name && crMap[resource.kind as YamlKindEnum]) {
+          createdResources.push({
+            kind: resource.kind as `${YamlKindEnum}`,
+            name: resource.metadata.name
+          });
+        }
       });
+    };
+    const rollbackCreatedResources = async () => {
+      for (const resource of [...createdResources].reverse()) {
+        try {
+          await crMap[resource.kind].delete(resource.name);
+          infoLog('Rolled back newly created resource', resource);
+        } catch (rollbackError: any) {
+          if (Number(getK8sErrorCode(rollbackError)) !== 404) {
+            errLog('Failed to roll back newly created resource', {
+              ...resource,
+              code: getK8sErrorCode(rollbackError),
+              message:
+                rollbackError?.body?.message ||
+                rollbackError?.response?.body?.message ||
+                rollbackError?.message
+            });
+          }
+        }
+      }
+    };
 
-      if (dependentCreateItems.length > 0) {
+    try {
+      if (workloadCreateItems.length > 0) {
+        const stableInstanceOwnerReferences =
+          workloadCreateItems[0].resource.metadata?.ownerReferences?.filter(
+            (ownerReference: V1OwnerReference) =>
+              ownerReference.apiVersion === 'app.sealos.io/v1' && ownerReference.kind === 'Instance'
+          );
+        currentWorkloadOwnerReferences =
+          stableInstanceOwnerReferences?.length > 0
+            ? stableInstanceOwnerReferences
+            : await getWorkloadOwnerReferences({
+                k8sApp,
+                namespace,
+                appName
+              });
+
+        if (dependentCreateItems.length > 0) {
+          await applyYamlList(
+            dependentCreateItems.map(({ resource }) =>
+              withOwnerReferences(yaml.dump(resource), currentWorkloadOwnerReferences!)
+            ),
+            'create'
+          );
+          rememberCreatedResources(dependentCreateItems);
+        }
+
         await applyYamlList(
-          dependentCreateItems.map(({ resource }) =>
-            withOwnerReferences(yaml.dump(resource), createdWorkloadOwnerReferences!)
-          ),
+          workloadCreateItems.map(({ resource }) => yaml.dump(resource)),
           'create'
         );
-      }
-    } else if (dependentCreateItems.length > 0) {
-      try {
+        rememberCreatedResources(workloadCreateItems);
+
+        const createdWorkloadKind = workloadCreateItems[0].resource.kind as WorkloadKind;
+        createdWorkloadOwnerReferences = await getWorkloadOwnerReferences({
+          k8sApp,
+          namespace,
+          appName,
+          kind: createdWorkloadKind
+        });
+      } else if (dependentCreateItems.length > 0) {
         const ownerReferences = await getWorkloadOwnerReferences({
           k8sApp,
           namespace,
           appName
         });
+        currentWorkloadOwnerReferences = ownerReferences;
         await applyYamlList(
           dependentCreateItems.map(({ resource }) =>
             withOwnerReferences(yaml.dump(resource), ownerReferences)
           ),
           'create'
         );
-      } catch (error) {
-        warnLog('Could not find workload for ownerReferences', { appName });
-        await applyYamlList(
-          dependentCreateItems.map(({ resource }) => yaml.dump(resource)),
-          'create'
-        );
+        rememberCreatedResources(dependentCreateItems);
       }
-    }
 
-    let recreatedWorkloadPatch: { recreated: true; kind: 'StatefulSet' } | undefined;
-    const recreateItem = recreateItems[0];
-    if (recreateItem) {
-      infoLog('recreate StatefulSet for storage topology change', { appName });
-      // Keep non-Pod dependents while the StatefulSet deletion restarts its Pods.
-      await patchExistingOwnerReferences({
-        k8sCore,
-        k8sNetworkingApp,
-        k8sAutoscaling,
-        k8sCustomObjects,
-        namespace,
-        appName,
-        ownerReferences: []
-      });
-      await k8sApp.deleteNamespacedStatefulSet(appName, namespace);
-      await waitForStatefulSetDeletion(k8sApp, appName, namespace);
-      await applyYamlList([yaml.dump(recreateItem.value)], 'create');
-      recreatedWorkloadPatch = { recreated: true, kind: 'StatefulSet' };
-    }
+      // Dependencies must be ready before a workload update can create fresh Pods (#7064).
+      // Run regular patches only after new dependency creation so a create conflict has no
+      // preceding patch side effects.
+      await Promise.all(regularPatches.map(applyPatchItem));
 
-    const workloadPatchResults = await Promise.all(workloadPatches.map(applyPatchItem));
-    const patchedRecreatedWorkload = workloadPatchResults.find((result) => result?.recreated);
+      let recreatedWorkloadPatch: { recreated: true; kind: 'StatefulSet' } | undefined;
+      const recreateItem = recreateItems[0];
+      if (recreateItem) {
+        infoLog('recreate StatefulSet for storage topology change', { appName });
+        // Keep non-Pod dependents while the StatefulSet deletion restarts its Pods.
+        await patchExistingOwnerReferences({
+          k8sCore,
+          k8sNetworkingApp,
+          k8sAutoscaling,
+          k8sCustomObjects,
+          namespace,
+          appName,
+          ownerReferences: []
+        });
+        await k8sApp.deleteNamespacedStatefulSet(appName, namespace);
+        await waitForStatefulSetDeletion(k8sApp, appName, namespace);
+        await applyYamlList([yaml.dump(recreateItem.value)], 'create');
+        recreatedWorkloadPatch = { recreated: true, kind: 'StatefulSet' };
+      }
 
-    if (recreatedWorkloadPatch || patchedRecreatedWorkload) {
-      createdWorkloadOwnerReferences = await getWorkloadOwnerReferences({
-        k8sApp,
-        namespace,
-        appName,
-        kind: (recreatedWorkloadPatch || patchedRecreatedWorkload).kind
-      });
-    }
+      const workloadPatchResults = await Promise.all(workloadPatches.map(applyPatchItem));
+      recreatedWorkloadPatch ??= workloadPatchResults.find((result) => result?.recreated);
 
-    if (
-      createdWorkloadOwnerReferences &&
-      (replacingWorkload || recreatedWorkloadPatch || patchedRecreatedWorkload)
-    ) {
-      await patchExistingOwnerReferences({
-        k8sCore,
-        k8sNetworkingApp,
-        k8sAutoscaling,
-        k8sCustomObjects,
-        namespace,
-        appName,
-        ownerReferences: createdWorkloadOwnerReferences
-      });
-    }
+      // The workload now references the new dependencies. They must remain if a later ownership
+      // migration or cleanup operation fails.
+      createdResources.length = 0;
 
-    // delete
-    await Promise.all(
-      normalizedPatch.map((item) => {
-        const cr = crMap[item.kind];
-        if (!cr || item.type !== 'delete' || !item?.name) {
-          return;
+      if (recreatedWorkloadPatch) {
+        createdWorkloadOwnerReferences = await getWorkloadOwnerReferences({
+          k8sApp,
+          namespace,
+          appName,
+          kind: recreatedWorkloadPatch.kind
+        });
+      }
+
+      if (createdWorkloadOwnerReferences && (replacingWorkload || recreatedWorkloadPatch)) {
+        await patchExistingOwnerReferences({
+          k8sCore,
+          k8sNetworkingApp,
+          k8sAutoscaling,
+          k8sCustomObjects,
+          namespace,
+          appName,
+          ownerReferences: createdWorkloadOwnerReferences
+        });
+      } else {
+        currentWorkloadOwnerReferences ??= await getWorkloadOwnerReferences({
+          k8sApp,
+          namespace,
+          appName
+        });
+        if (hasInstanceOwnerReference(currentWorkloadOwnerReferences)) {
+          await patchExistingOwnerReferences({
+            k8sCore,
+            k8sNetworkingApp,
+            k8sAutoscaling,
+            k8sCustomObjects,
+            namespace,
+            appName,
+            ownerReferences: currentWorkloadOwnerReferences
+          });
         }
-        infoLog('delete cr', { kind: item.kind, name: item?.name });
-        return cr.delete(item.name);
-      })
-    );
+      }
+
+      // delete
+      await Promise.all(
+        patch.map((item) => {
+          const cr = crMap[item.kind];
+          if (!cr || item.type !== 'delete' || !item?.name) {
+            return;
+          }
+          infoLog('delete cr', { kind: item.kind, name: item?.name });
+          // Deletion is idempotent: ownerReference GC or another controller may have already
+          // removed a resource from the generated cleanup plan. Only ignore a real K8s 404;
+          // permission, validation, conflict, and server errors must still fail the update.
+          return ignoreNotFound(cr.delete(item.name));
+        })
+      );
+    } catch (error) {
+      await rollbackCreatedResources();
+      throw error;
+    }
 
     // Update AppCR URL in background (non-blocking)
     updateAppCRUrl(k8sCustomObjects, namespace, appName, normalizedPatch).catch((error) => {
