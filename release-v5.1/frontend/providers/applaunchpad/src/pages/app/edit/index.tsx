@@ -63,10 +63,7 @@ import {
 } from '@/utils/public-domain';
 import { getCustomDomainBindings } from '@/utils/custom-domain';
 import { rebindMainServiceRoutes } from '@/utils/network-routes';
-import {
-  APP_NAME_BASE_MAX_LENGTH,
-  getInvalidNameMessageI18nKey
-} from '@/utils/appNameValidation';
+import { APP_NAME_BASE_MAX_LENGTH, getInvalidNameMessageI18nKey } from '@/utils/appNameValidation';
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz', 12);
 
@@ -281,7 +278,7 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
   const [forceUpdate, setForceUpdate] = useState(false);
   const { setAppDetail } = useAppStore();
   const { screenWidth, formSliderListConfig } = useGlobalStore();
-  const { userSourcePrice, loadUserSourcePrice } = useUserStore();
+  const { userSourcePrice, loadUserSourcePrice, checkQuotaAllow } = useUserStore();
   const { title, applyBtnText, applyMessage, applySuccess, applyError } = editModeMap(!!appName);
   const [yamlList, setYamlList] = useState<YamlItemType[]>([]);
   const [confirmContent, setConfirmContent] = useState(applyMessage);
@@ -324,8 +321,8 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
               result.status === 'pendingSync'
                 ? ('certificate_domain_pending_sync' as const)
                 : result.status === 'unsupported'
-                  ? ('certificate_domain_unsupported' as const)
-                  : ('certificate_domain_not_configured' as const)
+                ? ('certificate_domain_unsupported' as const)
+                : ('certificate_domain_not_configured' as const)
           };
         } catch (error) {
           return {
@@ -885,16 +882,23 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
                   });
                 }
               }
-              // quote check
-              // const quoteCheckRes = checkQuotaAllow(data, oldAppEditData.current);
-              // if (quoteCheckRes) {
-              //   return toast({
-              //     status: 'warning',
-              //     title: t(quoteCheckRes),
-              //     duration: 5000,
-              //     isClosable: true
-              //   });
-              // }
+              // quota check
+              try {
+                const quotaCheckResult = await checkQuotaAllow(data, oldAppEditData.current);
+                if (quotaCheckResult) {
+                  return toast({
+                    status: 'warning',
+                    title: t(quotaCheckResult),
+                    duration: 5000,
+                    isClosable: true
+                  });
+                }
+              } catch (error) {
+                return toast({
+                  status: 'error',
+                  title: getErrText(error) || t('Submit Error')
+                });
+              }
 
               // check network port
               if (!checkNetworkPorts(data.networks)) {
@@ -912,10 +916,10 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
                         customDomain: invalidCustomDomain.customDomain
                       })
                     : invalidCustomDomain.reason === 'certificate_domain_unsupported'
-                      ? t('custom_domain_certificate_unavailable')
-                      : t('custom_domain_certificate_not_configured', {
-                          customDomain: invalidCustomDomain.customDomain
-                        });
+                    ? t('custom_domain_certificate_unavailable')
+                    : t('custom_domain_certificate_not_configured', {
+                        customDomain: invalidCustomDomain.customDomain
+                      });
 
                 return toast({
                   status: 'warning',
@@ -976,8 +980,8 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
                             data.hpa.target === 'cpu'
                               ? 'CPU'
                               : data.hpa.target === 'gpu'
-                                ? 'GPU'
-                                : 'RAM',
+                              ? 'GPU'
+                              : 'RAM',
                           value: data.hpa.value
                         }
                       : undefined
