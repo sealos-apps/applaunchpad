@@ -244,7 +244,7 @@ const Form = ({
 
   const storageQuotaLeft = useMemo(() => {
     const storageQuota = userQuota?.find((item) => item.type === 'storage');
-    if (!storageQuota) return 0;
+    if (!storageQuota) return PVC_STORAGE_MAX;
 
     const newlyUsedStorage =
       storeList.reduce((sum, item) => sum + item.value, 0) -
@@ -560,14 +560,14 @@ const Form = ({
     const sortedCpuList = !!gpuType
       ? cpuList
       : cpu !== undefined
-        ? [...new Set([...cpuList, cpu])].sort((a, b) => a - b)
-        : cpuList;
+      ? [...new Set([...cpuList, cpu])].sort((a, b) => a - b)
+      : cpuList;
 
     const sortedMemoryList = !!gpuType
       ? memoryList
       : memory !== undefined
-        ? [...new Set([...memoryList, memory])].sort((a, b) => a - b)
-        : memoryList;
+      ? [...new Set([...memoryList, memory])].sort((a, b) => a - b)
+      : memoryList;
 
     const sortedEphemeralStorageList =
       ephemeralStorage !== undefined
@@ -1336,8 +1336,8 @@ const Form = ({
                             const valText = env.value
                               ? env.value
                               : env.valueFrom
-                                ? 'value from | ***'
-                                : '';
+                              ? 'value from | ***'
+                              : '';
                             return (
                               <tr key={env.id}>
                                 <th>{env.key}</th>
