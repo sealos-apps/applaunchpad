@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import handler from '@/pages/api/updateApp';
+import yaml from 'js-yaml';
 
 const initK8sMock = vi.hoisted(() => vi.fn());
 
@@ -336,105 +337,173 @@ describe('/api/updateApp', () => {
       error: undefined
     });
   });
+});
 
-  it('restarts Pods while preserving non-Pod dependents for an explicit storage topology change', async () => {
-    const k8s = createK8sContext();
-    k8s.k8sApp.readNamespacedStatefulSet.mockRejectedValueOnce({ body: { code: 404 } });
-    initK8sMock.mockResolvedValue(k8s);
-    const res = createResponse();
-    const desiredStatefulSet = {
-      kind: 'StatefulSet',
-      metadata: { name: 'demo' },
-      spec: {
-        volumeClaimTemplates: [{ metadata: { name: 'data' } }, { metadata: { name: 'storage' } }]
+it('restarts Pods while preserving non-Pod dependents for an explicit storage topology change', async () => {
+  const k8s = createK8sContext();
+  k8s.k8sApp.readNamespacedStatefulSet.mockRejectedValueOnce({ body: { code: 404 } });
+  initK8sMock.mockResolvedValue(k8s);
+  const res = createResponse();
+  const desiredStatefulSet = {
+    kind: 'StatefulSet',
+    metadata: { name: 'demo' },
+    spec: {
+      volumeClaimTemplates: [{ metadata: { name: 'data' } }, { metadata: { name: 'storage' } }]
+    }
+  };
+
+  await handler(
+    {
+      body: {
+        appName: 'demo',
+        stateFulSetYaml: statefulSetYaml,
+        patch: [
+          {
+            type: 'recreate',
+            kind: 'StatefulSet',
+            value: desiredStatefulSet
+          }
+        ]
       }
-    };
+    } as any,
+    res
+  );
 
-    await handler(
-      {
-        body: {
-          appName: 'demo',
-          stateFulSetYaml: statefulSetYaml,
-          patch: [
-            {
-              type: 'recreate',
-              kind: 'StatefulSet',
-              value: desiredStatefulSet
-            }
-          ]
-        }
-      } as any,
-      res
-    );
-
-    expect(k8s.k8sApp.deleteNamespacedStatefulSet).toHaveBeenCalledWith('demo', 'ns-demo');
-    expect(k8s.k8sApp.patchNamespacedStatefulSet).not.toHaveBeenCalled();
-    expect(k8s.applyYamlList).toHaveBeenCalledWith(
-      [expect.stringContaining('name: storage')],
-      'create'
-    );
-    expect(k8s.k8sCore.patchNamespacedPersistentVolumeClaim.mock.calls[0][2]).toEqual({
-      metadata: { ownerReferences: [] }
-    });
-    expect(
-      k8s.k8sCore.patchNamespacedPersistentVolumeClaim.mock.invocationCallOrder[0]
-    ).toBeLessThan(k8s.k8sApp.deleteNamespacedStatefulSet.mock.invocationCallOrder[0]);
-    expect(k8s.k8sApp.deleteNamespacedStatefulSet.mock.invocationCallOrder[0]).toBeLessThan(
-      k8s.applyYamlList.mock.invocationCallOrder[0]
-    );
-    expect(k8s.k8sCore.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
-    expect(k8s.k8sCore.patchNamespacedPersistentVolumeClaim).toHaveBeenCalled();
-    expect(res.json).toHaveBeenCalledWith({
-      code: 200,
-      message: 'Success',
-      data: undefined,
-      error: undefined
-    });
+  expect(k8s.k8sApp.deleteNamespacedStatefulSet).toHaveBeenCalledWith('demo', 'ns-demo');
+  expect(k8s.k8sApp.patchNamespacedStatefulSet).not.toHaveBeenCalled();
+  expect(k8s.applyYamlList).toHaveBeenCalledWith(
+    [expect.stringContaining('name: storage')],
+    'create'
+  );
+  expect(k8s.k8sCore.patchNamespacedPersistentVolumeClaim.mock.calls[0][2]).toEqual({
+    metadata: { ownerReferences: [] }
   });
+  expect(k8s.k8sCore.patchNamespacedPersistentVolumeClaim.mock.invocationCallOrder[0]).toBeLessThan(
+    k8s.k8sApp.deleteNamespacedStatefulSet.mock.invocationCallOrder[0]
+  );
+  expect(k8s.k8sApp.deleteNamespacedStatefulSet.mock.invocationCallOrder[0]).toBeLessThan(
+    k8s.applyYamlList.mock.invocationCallOrder[0]
+  );
+  expect(k8s.k8sCore.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
+  expect(k8s.k8sCore.patchNamespacedPersistentVolumeClaim).toHaveBeenCalled();
+  expect(res.json).toHaveBeenCalledWith({
+    code: 200,
+    message: 'Success',
+    data: undefined,
+    error: undefined
+  });
+});
 
-  it('upgrades a legacy StatefulSet patch to recreation when it adds a volume template', async () => {
-    const k8s = createK8sContext();
-    k8s.k8sApp.readNamespacedStatefulSet
-      .mockResolvedValueOnce({
-        body: {
-          metadata: { uid: 'old-statefulset-uid' },
-          spec: { volumeClaimTemplates: [{ metadata: { name: 'data' } }] }
-        }
-      })
-      .mockRejectedValueOnce({ body: { code: 404 } })
-      .mockResolvedValueOnce({ body: { metadata: { uid: 'new-statefulset-uid' } } });
-    initK8sMock.mockResolvedValue(k8s);
-    const res = createResponse();
-    const desiredStatefulSet = {
-      kind: 'StatefulSet',
-      metadata: { name: 'demo' },
-      spec: {
-        volumeClaimTemplates: [{ metadata: { name: 'data' } }, { metadata: { name: 'storage' } }]
+it('upgrades a legacy StatefulSet patch to recreation when it adds a volume template', async () => {
+  const k8s = createK8sContext();
+  k8s.k8sApp.readNamespacedStatefulSet
+    .mockResolvedValueOnce({
+      body: {
+        metadata: { uid: 'old-statefulset-uid' },
+        spec: { volumeClaimTemplates: [{ metadata: { name: 'data' } }] }
       }
-    };
+    })
+    .mockRejectedValueOnce({ body: { code: 404 } })
+    .mockResolvedValueOnce({ body: { metadata: { uid: 'new-statefulset-uid' } } });
+  initK8sMock.mockResolvedValue(k8s);
+  const res = createResponse();
+  const desiredStatefulSet = {
+    kind: 'StatefulSet',
+    metadata: { name: 'demo' },
+    spec: {
+      volumeClaimTemplates: [{ metadata: { name: 'data' } }, { metadata: { name: 'storage' } }]
+    }
+  };
 
-    await handler(
-      {
-        body: {
-          appName: 'demo',
-          stateFulSetYaml: statefulSetYaml,
-          patch: [
-            {
-              type: 'patch',
-              kind: 'StatefulSet',
-              value: desiredStatefulSet
-            }
-          ]
-        }
-      } as any,
-      res
-    );
+  await handler(
+    {
+      body: {
+        appName: 'demo',
+        stateFulSetYaml: statefulSetYaml,
+        patch: [
+          {
+            type: 'patch',
+            kind: 'StatefulSet',
+            value: desiredStatefulSet
+          }
+        ]
+      }
+    } as any,
+    res
+  );
 
-    expect(k8s.k8sApp.patchNamespacedStatefulSet).not.toHaveBeenCalled();
-    expect(k8s.k8sApp.deleteNamespacedStatefulSet).toHaveBeenCalledWith('demo', 'ns-demo');
-    expect(k8s.applyYamlList).toHaveBeenCalledWith(
-      [expect.stringContaining('name: storage')],
-      'create'
-    );
-  });
+  expect(k8s.k8sApp.patchNamespacedStatefulSet).not.toHaveBeenCalled();
+  expect(k8s.k8sApp.deleteNamespacedStatefulSet).toHaveBeenCalledWith('demo', 'ns-demo');
+  expect(k8s.applyYamlList).toHaveBeenCalledWith(
+    [expect.stringContaining('name: storage')],
+    'create'
+  );
+});
+
+it('completes PVC expansion and updates the template without deleting pods or PVCs', async () => {
+  const k8s = createK8sContext();
+  const current: any = yaml.load(statefulSetYaml);
+  current.metadata.uid = 'old-sts';
+  current.metadata.resourceVersion = '10';
+  const desired = structuredClone(current);
+  desired.spec.volumeClaimTemplates[0].metadata.annotations.value = '2';
+  desired.spec.volumeClaimTemplates[0].spec.resources.requests.storage = '2Gi';
+  const invalid = { body: { code: 422, message: 'spec: Forbidden: updates to statefulset spec' } };
+  k8s.k8sApp.patchNamespacedStatefulSet.mockRejectedValueOnce(invalid);
+  k8s.k8sApp.replaceNamespacedStatefulSet.mockRejectedValueOnce(invalid);
+  k8s.k8sApp.readNamespacedStatefulSet
+    .mockResolvedValueOnce({ body: current })
+    .mockResolvedValueOnce({ body: current })
+    .mockRejectedValueOnce({ body: { code: 404 } });
+  initK8sMock.mockResolvedValue(k8s);
+  const res = createResponse();
+  await handler(
+    {
+      body: {
+        appName: 'demo',
+        stateFulSetYaml: yaml.dump(desired),
+        patch: [{ type: 'patch', kind: 'StatefulSet', value: desired }]
+      }
+    } as any,
+    res
+  );
+  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 200 }));
+  expect(k8s.k8sCore.patchNamespacedPersistentVolumeClaim.mock.calls[0][2]).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ path: '/spec/resources/requests/storage', value: '2Gi' })
+    ])
+  );
+  expect(k8s.k8sApp.createNamespacedStatefulSet).toHaveBeenCalledWith(
+    'ns-demo',
+    expect.objectContaining({
+      spec: expect.objectContaining({ volumeClaimTemplates: desired.spec.volumeClaimTemplates })
+    })
+  );
+  expect(k8s.k8sCore.deleteNamespacedPersistentVolumeClaim).not.toHaveBeenCalled();
+});
+
+it('does not recreate a StatefulSet when expansion is forbidden by RBAC', async () => {
+  const k8s = createK8sContext();
+  const desired: any = yaml.load(statefulSetYaml);
+  desired.spec.volumeClaimTemplates[0].metadata.annotations.value = '2';
+  desired.spec.volumeClaimTemplates[0].spec.resources.requests.storage = '2Gi';
+  k8s.k8sApp.readNamespacedStatefulSet.mockResolvedValue({ body: yaml.load(statefulSetYaml) });
+  const forbidden = { body: { code: 403, message: 'User cannot update statefulsets' } };
+  k8s.k8sApp.patchNamespacedStatefulSet.mockRejectedValueOnce(forbidden);
+  k8s.k8sApp.replaceNamespacedStatefulSet.mockRejectedValueOnce(forbidden);
+  initK8sMock.mockResolvedValue(k8s);
+  const res = createResponse();
+  await handler(
+    {
+      body: {
+        appName: 'demo',
+        stateFulSetYaml: yaml.dump(desired),
+        patch: [{ type: 'patch', kind: 'StatefulSet', value: desired }]
+      }
+    } as any,
+    res
+  );
+  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 403 }));
+  expect(k8s.k8sApp.deleteNamespacedStatefulSet).not.toHaveBeenCalled();
+  expect(k8s.k8sApp.createNamespacedStatefulSet).not.toHaveBeenCalled();
 });
