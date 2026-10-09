@@ -3,8 +3,16 @@ import handler from '@/pages/api/updateApp';
 
 const initK8sMock = vi.hoisted(() => vi.fn());
 
-vi.mock('sealos-desktop-sdk/service', () => ({
-  initK8s: initK8sMock
+vi.mock('@/services/backend', () => ({
+  createK8sContext: initK8sMock
+}));
+
+vi.mock('@/services/backend/networkIsolationCapability', () => ({
+  isNetworkIsolationAvailable: vi.fn(async () => false)
+}));
+
+vi.mock('@/services/backend/networkIsolation', () => ({
+  syncExistingNetworkIsolationIfPresent: vi.fn(async () => undefined)
 }));
 
 vi.mock('sealos-desktop-sdk', () => ({
