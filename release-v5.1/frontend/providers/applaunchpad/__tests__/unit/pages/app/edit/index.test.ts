@@ -2,6 +2,29 @@ import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 
 describe('EditApp yaml display state', () => {
+  it('keeps the edit layout inside a narrow iframe viewport', () => {
+    const editPageSource = readFileSync(
+      new URL('../../../../../src/pages/app/edit/index.tsx', import.meta.url),
+      'utf8'
+    );
+    const formSource = readFileSync(
+      new URL('../../../../../src/pages/app/edit/components/Form.tsx', import.meta.url),
+      'utf8'
+    );
+    const yamlSource = readFileSync(
+      new URL('../../../../../src/pages/app/edit/components/Yaml.tsx', import.meta.url),
+      'utf8'
+    );
+
+    expect(editPageSource).toContain("'html, body':");
+    expect(editPageSource).toContain('minWidth: 0');
+    expect(editPageSource).toContain('minWidth={0}');
+    expect(editPageSource).not.toContain("minWidth={'1024px'}");
+    expect(formSource).toContain("md: '180px minmax(0, 1fr)'");
+    expect(formSource).toContain("lg: '220px minmax(0, 1fr)'");
+    expect(yamlSource).toContain("md: '180px minmax(0, 1fr)'");
+  });
+
   it('keeps custom-domain verification yaml display masked while caching raw yaml', () => {
     const source = readFileSync(
       new URL('../../../../../src/pages/app/edit/index.tsx', import.meta.url),
@@ -29,7 +52,7 @@ describe('EditApp yaml display state', () => {
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(source.indexOf('removeStoreList(originalIndex)')).toBeGreaterThan(start);
-    expect(source).toContain('existingStores.some((store) => store.path === item.path)');
+    expect(source).toMatch(/existingStores\.some\(\s*\(store\) => store\.path === item\.path\s*\)/);
     expect(source).toContain("t('Store At Least One')");
     expect(source).not.toContain('localStores.length === 1');
   });
@@ -60,9 +83,7 @@ describe('EditApp yaml display state', () => {
 
     expect(helperStart).toBeGreaterThanOrEqual(0);
     expect(helperEnd).toBeGreaterThan(helperStart);
-    expect(helper).toContain(
-      'network.openNodePort ? withoutMainServiceBinding(network) : network'
-    );
+    expect(helper).toContain('network.openNodePort ? withoutMainServiceBinding(network) : network');
     expect(source.match(/preserveClusterIpServiceBinding\(currentNetwork\)/g)).toHaveLength(3);
   });
 });

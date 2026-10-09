@@ -63,16 +63,14 @@ import {
 } from '@/utils/public-domain';
 import { getCustomDomainBindings } from '@/utils/custom-domain';
 import { rebindMainServiceRoutes } from '@/utils/network-routes';
-import {
-  APP_NAME_BASE_MAX_LENGTH,
-  getInvalidNameMessageI18nKey
-} from '@/utils/appNameValidation';
+import { APP_NAME_BASE_MAX_LENGTH, getInvalidNameMessageI18nKey } from '@/utils/appNameValidation';
+import { Global } from '@emotion/react';
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz', 12);
 
 const ErrorModal = dynamic(() => import('./components/ErrorModal'));
 
-const EDIT_PAGE_MIN_PADDING = 20;
+const EDIT_PAGE_MIN_PADDING = 12;
 const EDIT_PAGE_NAV_WIDTH = 220;
 const EDIT_PAGE_COLUMN_GAP = 20;
 const EDIT_PAGE_CONTENT_TARGET_WIDTH = 1100;
@@ -324,8 +322,8 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
               result.status === 'pendingSync'
                 ? ('certificate_domain_pending_sync' as const)
                 : result.status === 'unsupported'
-                  ? ('certificate_domain_unsupported' as const)
-                  : ('certificate_domain_not_configured' as const)
+                ? ('certificate_domain_unsupported' as const)
+                : ('certificate_domain_not_configured' as const)
           };
         } catch (error) {
           return {
@@ -783,13 +781,23 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
 
   return (
     <>
+      <Global
+        styles={{
+          'html, body': {
+            minWidth: 0,
+            overflowX: 'hidden'
+          }
+        }}
+      />
       <Flex
         flexDirection={'column'}
         alignItems={'center'}
         h={'100%'}
-        minWidth={'1024px'}
+        minWidth={0}
+        w={'100%'}
         backgroundColor={'grayModern.100'}
         overflowY={'auto'}
+        overflowX={'hidden'}
       >
         <Header
           appName={formHook.getValues('appName')}
@@ -912,10 +920,10 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
                         customDomain: invalidCustomDomain.customDomain
                       })
                     : invalidCustomDomain.reason === 'certificate_domain_unsupported'
-                      ? t('custom_domain_certificate_unavailable')
-                      : t('custom_domain_certificate_not_configured', {
-                          customDomain: invalidCustomDomain.customDomain
-                        });
+                    ? t('custom_domain_certificate_unavailable')
+                    : t('custom_domain_certificate_not_configured', {
+                        customDomain: invalidCustomDomain.customDomain
+                      });
 
                 return toast({
                   status: 'warning',
@@ -976,8 +984,8 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
                             data.hpa.target === 'cpu'
                               ? 'CPU'
                               : data.hpa.target === 'gpu'
-                                ? 'GPU'
-                                : 'RAM',
+                              ? 'GPU'
+                              : 'RAM',
                           value: data.hpa.value
                         }
                       : undefined
