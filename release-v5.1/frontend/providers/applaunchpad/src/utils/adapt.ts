@@ -677,6 +677,10 @@ export const adaptAppDetail = async (
     volumeMounts: getFilteredVolumeMounts(),
     volumes: getFilteredVolumes(),
     kind: appDeploy?.kind?.toLowerCase() as 'deployment' | 'statefulset',
+    statefulSetServiceName:
+      appDeploy?.kind === YamlKindEnum.StatefulSet
+        ? (appDeploy as V1StatefulSet).spec?.serviceName
+        : undefined,
     source: getAppSource(appDeploy),
     openapi: {
       status: {
@@ -710,6 +714,7 @@ export const adaptEditAppData = (app: AppDetailType): AppEditType => {
     'gpu',
     'labels',
     'kind',
+    'statefulSetServiceName',
     'volumes',
     'volumeMounts',
     'ephemeralStorage',

@@ -29,7 +29,8 @@ describe('EditApp yaml display state', () => {
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(source.indexOf('removeStoreList(originalIndex)')).toBeGreaterThan(start);
-    expect(source).toContain('existingStores.some((store) => store.path === item.path)');
+    expect(source).toContain('existingStores.some(');
+    expect(source).toContain('(store) => store.path === item.path');
     expect(source).toContain("t('Store At Least One')");
     expect(source).not.toContain('localStores.length === 1');
   });
@@ -60,9 +61,17 @@ describe('EditApp yaml display state', () => {
 
     expect(helperStart).toBeGreaterThanOrEqual(0);
     expect(helperEnd).toBeGreaterThan(helperStart);
-    expect(helper).toContain(
-      'network.openNodePort ? withoutMainServiceBinding(network) : network'
-    );
+    expect(helper).toContain('network.openNodePort ? withoutMainServiceBinding(network) : network');
     expect(source.match(/preserveClusterIpServiceBinding\(currentNetwork\)/g)).toHaveLength(3);
+  });
+
+  it('verifies only new or changed custom-domain bindings on update', () => {
+    const source = readFileSync(
+      new URL('../../../../../src/pages/app/edit/index.tsx', import.meta.url),
+      'utf8'
+    );
+
+    expect(source).toContain('getChangedCustomDomainBindings(');
+    expect(source).toContain('oldAppEditData.current?.networks');
   });
 });
