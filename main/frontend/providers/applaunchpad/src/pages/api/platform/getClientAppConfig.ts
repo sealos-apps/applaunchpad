@@ -23,7 +23,12 @@ export function getClientAppConfigServer() {
     currencySymbol: fullConfig.launchpad.ui.currencySymbol,
     pvcStorageMax: fullConfig.launchpad.pvcStorageMax,
     analytics: fullConfig.launchpad.analytics,
-    components: fullConfig.launchpad.components,
+    components: {
+      monitoring: fullConfig.launchpad.components.monitoring,
+      billing: fullConfig.launchpad.components.billing,
+      logging: fullConfig.launchpad.components.logging,
+      eventAnalysis: fullConfig.launchpad.components.eventAnalysis
+    },
     appResourceFormSliderConfig: fullConfig.launchpad.ui.appResourceFormSliderConfig,
     fileManager: fullConfig.launchpad.fileManager,
     meta: {

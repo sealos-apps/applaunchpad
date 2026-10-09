@@ -71,6 +71,7 @@
     "sass": "^1.68.0",
     "sealos-desktop-sdk": "workspace:*",
     "sonner": "^2.0.0",
+    "sealos-metrics-sdk": "workspace:*",
     "typescript": "^5.2.2",
     "zod": "^4.3.5",
     "zod-openapi": "^4.2.4",

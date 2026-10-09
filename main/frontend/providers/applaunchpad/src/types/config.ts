@@ -89,6 +89,15 @@ const UiSchema = z.strictObject({
 });
 
 const ComponentsSchema = z.strictObject({
+  metrics: z
+    .strictObject({
+      url: z.string().url(),
+      whitelistKubernetesHosts: z.array(z.string()).default([])
+    })
+    .default({
+      url: 'http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus',
+      whitelistKubernetesHosts: []
+    }),
   monitoring: z.strictObject({
     url: z.string()
   }),
