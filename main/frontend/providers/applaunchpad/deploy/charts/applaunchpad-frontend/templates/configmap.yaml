@@ -40,6 +40,9 @@ data:
             cpu: [8000, 16000, 32000, 48000, 64000, 80000, 108000]
             memory: [16384, 32768, 65536, 131072, 262144, 524288, 614400]
       components:
+        metrics:
+          url: {{ .Values.applaunchpadConfig.metricsUrl | quote }}
+          whitelistKubernetesHosts: []
         monitoring:
           url: {{ .Values.applaunchpadConfig.monitorUrl | quote }}
         billing:

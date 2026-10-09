@@ -28,6 +28,9 @@ launchpad:
         memory: [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 
   components:
+    metrics:
+      url: http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus
+      whitelistKubernetesHosts: []
     monitoring:
       url: http://launchpad-monitor.sealos.svc.cluster.local:8428
     billing:
