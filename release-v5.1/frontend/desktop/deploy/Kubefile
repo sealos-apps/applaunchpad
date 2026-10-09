@@ -1,0 +1,9 @@
+FROM scratch
+
+USER 65532:65532
+
+COPY registry registry
+COPY charts charts
+COPY desktop-frontend-entrypoint.sh desktop-frontend-entrypoint.sh
+
+CMD ["bash desktop-frontend-entrypoint.sh"]

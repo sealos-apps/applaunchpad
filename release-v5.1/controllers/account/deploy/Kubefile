@@ -1,0 +1,9 @@
+FROM scratch
+
+USER 65532:65532
+
+COPY registry registry
+COPY charts charts
+COPY account-controller-entrypoint.sh account-controller-entrypoint.sh
+
+CMD ["bash account-controller-entrypoint.sh"]
