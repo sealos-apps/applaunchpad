@@ -1,2 +1,2 @@
 # Exact false-positive fingerprint in the imported public AppLaunchpad test fixture.
-main/frontend/providers/applaunchpad/__tests__/unit/utils/dotenvEnv.test.ts:generic-api-key:72
+main/applaunchpad/__tests__/unit/utils/dotenvEnv.test.ts:generic-api-key:72
