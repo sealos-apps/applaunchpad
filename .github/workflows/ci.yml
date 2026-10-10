@@ -1,0 +1,287 @@
+name: AppLaunchpad Images
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "main/**"
+      - "release-v5.1/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "main/**"
+      - "release-v5.1/**"
+      - ".github/workflows/ci.yml"
+  workflow_dispatch:
+    inputs:
+      publish_images:
+        description: Publish runtime and cluster images
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: applaunchpad-images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME_IMAGE_NAME: ghcr.io/${{ github.repository }}/applaunchpad-frontend
+  CLUSTER_IMAGE_NAME: ghcr.io/${{ github.repository }}/applaunchpad-cluster
+  SEALOS_VERSION: v5.1.2-rc5
+
+jobs:
+  validate:
+    name: Validate ${{ matrix.snapshot }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        snapshot:
+          - main
+          - release-v5.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.20.2
+          cache: pnpm
+          cache-dependency-path: ${{ matrix.snapshot }}/frontend/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        working-directory: ${{ matrix.snapshot }}/frontend
+        run: pnpm install --frozen-lockfile
+      - name: Run AppLaunchpad unit tests
+        if: matrix.snapshot == 'main'
+        working-directory: ${{ matrix.snapshot }}/frontend
+        run: pnpm --filter applaunchpad run test:unit
+      - name: Build AppLaunchpad
+        working-directory: ${{ matrix.snapshot }}/frontend
+        run: pnpm --filter applaunchpad run build
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.18.0
+      - name: Validate Helm chart
+        env:
+          DEPLOY_DIR: ${{ matrix.snapshot }}/frontend/providers/applaunchpad/deploy
+        run: |
+          set -euo pipefail
+          helm lint "${DEPLOY_DIR}/charts/applaunchpad-frontend"
+          helm template applaunchpad-frontend "${DEPLOY_DIR}/charts/applaunchpad-frontend" \
+            --namespace applaunchpad-frontend >/dev/null
+
+  release-metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      main_tag: ${{ steps.metadata.outputs.main_tag }}
+      release_tag: ${{ steps.metadata.outputs.release_tag }}
+    steps:
+      - id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:7}"
+          echo "main_tag=main-${short_sha}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=release-v5.1-${short_sha}" >> "${GITHUB_OUTPUT}"
+
+  runtime-images:
+    name: Build runtime ${{ matrix.snapshot }} (${{ matrix.arch }})
+    needs:
+      - validate
+      - release-metadata
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_images == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        snapshot:
+          - main
+          - release-v5.1
+        arch:
+          - amd64
+          - arm64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select image tag
+        id: image-tag
+        env:
+          SNAPSHOT: ${{ matrix.snapshot }}
+          MAIN_TAG: ${{ needs.release-metadata.outputs.main_tag }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          case "${SNAPSHOT}" in
+            main) echo "image_tag=${MAIN_TAG}" >> "${GITHUB_OUTPUT}" ;;
+            release-v5.1) echo "image_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}" ;;
+            *) echo "Unsupported snapshot: ${SNAPSHOT}" >&2; exit 1 ;;
+          esac
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.arch == 'arm64'
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.snapshot }}/frontend
+          file: ./${{ matrix.snapshot }}/frontend/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ${{ env.RUNTIME_IMAGE_NAME }}:${{ steps.image-tag.outputs.image_tag }}-${{ matrix.arch }}
+
+  runtime-release:
+    needs:
+      - runtime-images
+      - release-metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish runtime manifests
+        env:
+          MAIN_TAG: ${{ needs.release-metadata.outputs.main_tag }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          publish_manifest() {
+            local tag="$1"
+            local stable_tag="$2"
+            docker buildx imagetools create -t "${RUNTIME_IMAGE_NAME}:${tag}" \
+              -t "${RUNTIME_IMAGE_NAME}:${stable_tag}" \
+              "${RUNTIME_IMAGE_NAME}:${tag}-amd64" \
+              "${RUNTIME_IMAGE_NAME}:${tag}-arm64"
+            docker buildx imagetools inspect "${RUNTIME_IMAGE_NAME}:${tag}"
+          }
+          publish_manifest "${MAIN_TAG}" latest
+          publish_manifest "${RELEASE_TAG}" release-v5.1-latest
+
+  cluster-images:
+    name: Build cluster ${{ matrix.snapshot }} (${{ matrix.arch }})
+    needs:
+      - runtime-release
+      - release-metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        snapshot:
+          - main
+          - release-v5.1
+        arch:
+          - amd64
+          - arm64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select image tag
+        id: image-tag
+        env:
+          SNAPSHOT: ${{ matrix.snapshot }}
+          MAIN_TAG: ${{ needs.release-metadata.outputs.main_tag }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          case "${SNAPSHOT}" in
+            main) echo "image_tag=${MAIN_TAG}" >> "${GITHUB_OUTPUT}" ;;
+            release-v5.1) echo "image_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}" ;;
+            *) echo "Unsupported snapshot: ${SNAPSHOT}" >&2; exit 1 ;;
+          esac
+      - name: Install Sealos
+        shell: bash
+        run: |
+          set -euo pipefail
+          work_dir="$(mktemp -d)"
+          curl -fsSL -o "${work_dir}/sealos.tar.gz" \
+            "https://github.com/labring/sealos/releases/download/${SEALOS_VERSION}/sealos_${SEALOS_VERSION#v}_linux_amd64.tar.gz"
+          tar -xzf "${work_dir}/sealos.tar.gz" -C "${work_dir}"
+          sudo install "${work_dir}/sealos" /usr/local/bin/sealos
+          sealos version
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login Sealos to GHCR
+        run: sudo sealos login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
+      - name: Build, publish, and archive cluster image
+        working-directory: ${{ matrix.snapshot }}/frontend/providers/applaunchpad/deploy
+        env:
+          ARCH: ${{ matrix.arch }}
+          IMAGE_TAG: ${{ steps.image-tag.outputs.image_tag }}
+          RUNTIME_IMAGE: ${{ env.RUNTIME_IMAGE_NAME }}:${{ steps.image-tag.outputs.image_tag }}
+          CLUSTER_IMAGE: ${{ env.CLUSTER_IMAGE_NAME }}:${{ steps.image-tag.outputs.image_tag }}-${{ matrix.arch }}
+          ARCHIVE_DIR: ${{ runner.temp }}
+          SNAPSHOT: ${{ matrix.snapshot }}
+        run: |
+          set -euo pipefail
+          sed -i -E "s|^image: .*|image: ${RUNTIME_IMAGE}|" charts/applaunchpad-frontend/values.yaml
+          sudo sealos registry save --registry-dir=registry --arch "${ARCH}" .
+          sudo sealos build -t "${CLUSTER_IMAGE}" --platform "linux/${ARCH}" -f Kubefile .
+          sudo sealos push "${CLUSTER_IMAGE}"
+          archive_basename="applaunchpad-${SNAPSHOT}-cluster-${IMAGE_TAG}-${ARCH}"
+          sudo sealos save -o "${ARCHIVE_DIR}/${archive_basename}.tar" "${CLUSTER_IMAGE}"
+          gzip -f "${ARCHIVE_DIR}/${archive_basename}.tar"
+          md5sum "${ARCHIVE_DIR}/${archive_basename}.tar.gz" > "${ARCHIVE_DIR}/${archive_basename}.tar.gz.md5"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cluster-bundle-${{ matrix.snapshot }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/applaunchpad-${{ matrix.snapshot }}-cluster-*.tar.gz
+            ${{ runner.temp }}/applaunchpad-${{ matrix.snapshot }}-cluster-*.tar.gz.md5
+          if-no-files-found: error
+          retention-days: 7
+
+  cluster-release:
+    needs:
+      - cluster-images
+      - release-metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish cluster manifests
+        env:
+          MAIN_TAG: ${{ needs.release-metadata.outputs.main_tag }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          publish_manifest() {
+            local tag="$1"
+            local stable_tag="$2"
+            docker buildx imagetools create -t "${CLUSTER_IMAGE_NAME}:${tag}" \
+              -t "${CLUSTER_IMAGE_NAME}:${stable_tag}" \
+              "${CLUSTER_IMAGE_NAME}:${tag}-amd64" \
+              "${CLUSTER_IMAGE_NAME}:${tag}-arm64"
+            docker buildx imagetools inspect "${CLUSTER_IMAGE_NAME}:${tag}"
+          }
+          publish_manifest "${MAIN_TAG}" latest
+          publish_manifest "${RELEASE_TAG}" release-v5.1-latest
