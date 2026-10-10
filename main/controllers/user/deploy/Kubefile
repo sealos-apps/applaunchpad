@@ -1,9 +1,0 @@
-FROM scratch
-
-USER 65532:65532
-
-COPY registry registry
-COPY charts charts
-COPY drop drop
-COPY user-controller-entrypoint.sh user-controller-entrypoint.sh
-CMD ["bash user-controller-entrypoint.sh"]

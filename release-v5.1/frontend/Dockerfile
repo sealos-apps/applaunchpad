@@ -62,24 +62,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 # COPY --from=deps /app/packages ./packages
 
-ARG name
-ARG path
+ARG name=applaunchpad
+ARG path=providers/applaunchpad
 
 COPY ${path} ${path}
 
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm --frozen-lockfile --filter=$name install && \
     pnpm --filter=$name run build
 
-RUN if [ "$name" = "desktop" ]; then \
-    mkdir -p desktop/.next/standalone/desktop/prisma/global && \
-    mkdir -p desktop/.next/standalone/desktop/prisma/region && \
-    cp -r ./desktop/prisma/global/migrations desktop/.next/standalone/desktop/prisma/global/migrations; \
-    cp -r ./desktop/prisma/region/migrations desktop/.next/standalone/desktop/prisma/region/migrations; \
-    if [ -d "./desktop/prisma/providers" ]; then \
-        mkdir -p desktop/.next/standalone/desktop/prisma/providers && \
-        cp -r ./desktop/prisma/providers/* desktop/.next/standalone/desktop/prisma/providers/; \
-    fi; \
-fi
 # Production image, copy all the files and run next
 FROM base AS runner
 
@@ -97,16 +87,8 @@ RUN apk add curl \
   && update-ca-certificates \
   && apk add --no-cache dumb-init
 
-ARG name
-ARG path
-
-# Install Git and OpenSSH client if $name is equal to template
-RUN if [ "$name" = "template" ]; then \
-    apk add --no-cache git openssh-client; \
-fi
-RUN if [ "$name" = "desktop" ]; then \
-    npm install -g prisma@5.10.2; \
-fi
+ARG name=applaunchpad
+ARG path=providers/applaunchpad
 USER nextjs
 
 # You only need to copy next.config.js if you are NOT using the default configuration

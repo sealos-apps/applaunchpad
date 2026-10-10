@@ -1,66 +1,37 @@
-DOCKER_USERNAME := $(DOCKER_USERNAME)
-IMAGE_TAG := $(IMAGE_TAG)
+DOCKER_USERNAME ?=
+IMAGE_TAG ?= dev
+PLATFORMS ?= linux/amd64,linux/arm64
+IMAGE_ARCHIVE ?= applaunchpad.tar
 
 ifneq ($(strip $(DOCKER_USERNAME)),)
   imageOwner := $(DOCKER_USERNAME)/
 else
   imageOwner :=
 endif
+IMAGE ?= $(imageOwner)sealos-applaunchpad:$(IMAGE_TAG)
 
-ifneq ($(strip $(IMAGE_TAG)),)
-  imageTag := $(IMAGE_TAG)
-else
-  imageTag := dev
-endif
-# build image
-buildTargets := \
-	desktop \
-	providers/costcenter \
-	providers/dbprovider \
-	providers/applaunchpad \
-	providers/imagehub \
-	providers/license
+.PHONY: all push-images fetch-deps build-packages build-providers/applaunchpad dev-providers/applaunchpad image-build-providers/applaunchpad image-push-providers/applaunchpad
 
-buildTargets-all := $(addprefix image-build-,$(buildTargets))
-pushTargets-all := $(addprefix image-push-,$(buildTargets))
-$(foreach target,$(buildTargets),$(eval .PHONY: image-build-$($(target))))
-$(foreach target,$(buildTargets),$(eval .PHONY: image-push-$($(target))))
-$(foreach target,$(buildTargets),$(eval .PHONY: dev-$($(target))))
-$(foreach target,$(buildTargets),$(eval .PHONY: build-$($(target))))
-.PHONY: all image-prebuild push-images
+all: image-build-providers/applaunchpad
+push-images: image-push-providers/applaunchpad
 
-all: image-prebuild $(buildTargets-all)
-
-push-images: image-prebuild $(pushTargets-all)
 fetch-deps: pnpm-lock.yaml
 	pnpm fetch
+
 build-packages: fetch-deps
-	pnpm -r --offline --filter=./packages/* install
-	pnpm -r --offline --filter=./packages/* build
-build-providers/%: build-packages
-	pnpm -r --offline --filter=./providers/$* install
-	pnpm -r --offline --filter=./providers/$* build
-build-%: build-packages
-	pnpm -r --offline --filter=$* install
-	pnpm -r --offline --filter=$* build
-dev-providers/%: build-packages
-	pnpm -r --offline --filter=./providers/$* install
-	pnpm -r --offline --filter=./providers/$* dev
-dev-%: build-packages
-	pnpm -r --offline --filter=$* install
-	pnpm -r --offline --filter=$* dev
+	pnpm -r --offline --filter='./packages/*' install
+	pnpm -r --filter='./packages/*' run build
 
-# prebuild-image-for -j
-image-prebuild: pnpm-lock.yaml
-	docker build --platform=linux/amd64 --target deps . -t $(imageOwner)sealos-deps:dev
+build-providers/applaunchpad: build-packages
+	pnpm --offline --filter=applaunchpad install
+	pnpm --filter=applaunchpad run build
 
-image-build-providers/%: image-prebuild
-	docker build --platform=linux/amd64 -t $(imageOwner)sealos-$*:$(imageTag) --build-arg path=providers/$* --build-arg name=$* .
-image-build-%: image-prebuild
-	docker build --platform=linux/amd64 -t $(imageOwner)sealos-$*:$(imageTag) --build-arg path=$* --build-arg name=$* .
+dev-providers/applaunchpad: build-packages
+	pnpm --offline --filter=applaunchpad install
+	pnpm --filter=applaunchpad run dev
 
-image-push-providers/%: image-build-providers/%
-	docker push $(imageOwner)sealos-$*:$(imageTag)
-image-push-%: image-build-%
-	docker push $(imageOwner)sealos-$*:$(imageTag)
-# Default target to run all builds.
+image-build-providers/applaunchpad:
+	docker buildx build --platform=$(PLATFORMS) -t $(IMAGE) --output=type=oci,dest=$(IMAGE_ARCHIVE) .
+
+image-push-providers/applaunchpad:
+	docker buildx build --platform=$(PLATFORMS) -t $(IMAGE) --push .
