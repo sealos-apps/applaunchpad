@@ -27,7 +27,7 @@ bucket and app prefix (for example, `sealos-io/offline/sealos-apps/applaunchpad`
 Archives are uploaded to:
 
 ```text
-oss://<OSS_BUCKET>/ci/<snapshot>/<short-sha>/applaunchpad-<snapshot>-cluster-<snapshot>-<short-sha>-<arch>.tar.gz
+oss://<OSS_BUCKET>/ci/<snapshot>/<short-sha>/applaunchpad-cluster-<snapshot>-<short-sha>-<arch>.tar.gz
 ```
 
 Each archive has a matching `.tar.gz.md5` file. Snapshots are `main` and
