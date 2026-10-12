@@ -238,14 +238,13 @@ jobs:
           RUNTIME_IMAGE: ${{ env.RUNTIME_IMAGE_NAME }}:${{ steps.image-tag.outputs.image_tag }}
           CLUSTER_IMAGE: ${{ env.CLUSTER_IMAGE_NAME }}:${{ steps.image-tag.outputs.image_tag }}-${{ matrix.arch }}
           ARCHIVE_DIR: ${{ runner.temp }}
-          SNAPSHOT: ${{ matrix.snapshot }}
         run: |
           set -euo pipefail
           sed -i -E "s|^image: .*|image: ${RUNTIME_IMAGE}|" charts/applaunchpad-frontend/values.yaml
           sudo sealos registry save --registry-dir=registry --arch "${ARCH}" .
           sudo sealos build -t "${CLUSTER_IMAGE}" --platform "linux/${ARCH}" -f Kubefile .
           sudo sealos push "${CLUSTER_IMAGE}"
-          archive_basename="applaunchpad-${SNAPSHOT}-cluster-${IMAGE_TAG}-${ARCH}"
+          archive_basename="applaunchpad-cluster-${IMAGE_TAG}-${ARCH}"
           sudo sealos save -o "${ARCHIVE_DIR}/${archive_basename}.tar" "${CLUSTER_IMAGE}"
           gzip -f "${ARCHIVE_DIR}/${archive_basename}.tar"
           (cd "${ARCHIVE_DIR}" && md5sum "${archive_basename}.tar.gz" > "${archive_basename}.tar.gz.md5")
@@ -253,8 +252,8 @@ jobs:
         with:
           name: cluster-bundle-${{ matrix.snapshot }}-${{ matrix.arch }}
           path: |
-            ${{ runner.temp }}/applaunchpad-${{ matrix.snapshot }}-cluster-*.tar.gz
-            ${{ runner.temp }}/applaunchpad-${{ matrix.snapshot }}-cluster-*.tar.gz.md5
+            ${{ runner.temp }}/applaunchpad-cluster-*.tar.gz
+            ${{ runner.temp }}/applaunchpad-cluster-*.tar.gz.md5
           if-no-files-found: error
           retention-days: 7
 
@@ -342,7 +341,7 @@ jobs:
           [[ "${#archives[@]}" -eq 2 ]] || { echo "Expected 2 cluster archives, found ${#archives[@]}" >&2; exit 1; }
           [[ "${#checksums[@]}" -eq 2 ]] || { echo "Expected 2 cluster checksums, found ${#checksums[@]}" >&2; exit 1; }
           for arch in amd64 arm64; do
-            archive="applaunchpad-${SNAPSHOT}-cluster-${image_tag}-${arch}.tar.gz"
+            archive="applaunchpad-cluster-${image_tag}-${arch}.tar.gz"
             [[ -f "${archive}" && -f "${archive}.md5" ]] || { echo "Missing archive or checksum: ${archive}" >&2; exit 1; }
             md5sum -c "${archive}.md5"
           done
