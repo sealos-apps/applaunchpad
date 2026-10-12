@@ -22,6 +22,11 @@ on:
         required: true
         default: false
         type: boolean
+      upload_oss:
+        description: Upload cluster image archives to OSS (also publishes images)
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -96,7 +101,7 @@ jobs:
     needs:
       - validate
       - release-metadata
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_images == true)
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.publish_images == true || inputs.upload_oss == true))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -243,7 +248,7 @@ jobs:
           archive_basename="applaunchpad-${SNAPSHOT}-cluster-${IMAGE_TAG}-${ARCH}"
           sudo sealos save -o "${ARCHIVE_DIR}/${archive_basename}.tar" "${CLUSTER_IMAGE}"
           gzip -f "${ARCHIVE_DIR}/${archive_basename}.tar"
-          md5sum "${ARCHIVE_DIR}/${archive_basename}.tar.gz" > "${ARCHIVE_DIR}/${archive_basename}.tar.gz.md5"
+          (cd "${ARCHIVE_DIR}" && md5sum "${archive_basename}.tar.gz" > "${archive_basename}.tar.gz.md5")
       - uses: actions/upload-artifact@v4
         with:
           name: cluster-bundle-${{ matrix.snapshot }}-${{ matrix.arch }}
@@ -285,3 +290,67 @@ jobs:
           }
           publish_manifest "${MAIN_TAG}" latest
           publish_manifest "${RELEASE_TAG}" release-v5.1-latest
+
+  oss-upload:
+    name: Upload cluster archives to OSS (${{ matrix.snapshot }})
+    needs:
+      - cluster-images
+      - cluster-release
+      - release-metadata
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.upload_oss == true)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        snapshot:
+          - main
+          - release-v5.1
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cluster-bundle-${{ matrix.snapshot }}-*
+          path: cluster-bundles
+          merge-multiple: true
+      - name: Upload cluster archives to OSS
+        env:
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ vars.OSS_BUCKET }}
+          SNAPSHOT: ${{ matrix.snapshot }}
+          MAIN_TAG: ${{ needs.release-metadata.outputs.main_tag }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.release_tag }}
+        shell: bash
+        working-directory: cluster-bundles
+        run: |
+          set -euo pipefail
+          : "${OSS_ENDPOINT:?OSS_ENDPOINT is required}"
+          : "${OSS_ACCESS_KEY_ID:?OSS_ACCESS_KEY_ID is required}"
+          : "${OSS_ACCESS_KEY_SECRET:?OSS_ACCESS_KEY_SECRET is required}"
+          : "${OSS_BUCKET:?OSS_BUCKET is required}"
+          case "${SNAPSHOT}" in
+            main) image_tag="${MAIN_TAG}" ;;
+            release-v5.1) image_tag="${RELEASE_TAG}" ;;
+            *) echo "Unsupported snapshot: ${SNAPSHOT}" >&2; exit 1 ;;
+          esac
+          short_sha="${GITHUB_SHA:0:7}"
+          oss_prefix="ci/${SNAPSHOT}/${short_sha}"
+
+          shopt -s nullglob
+          archives=(*.tar.gz)
+          checksums=(*.tar.gz.md5)
+          [[ "${#archives[@]}" -eq 2 ]] || { echo "Expected 2 cluster archives, found ${#archives[@]}" >&2; exit 1; }
+          [[ "${#checksums[@]}" -eq 2 ]] || { echo "Expected 2 cluster checksums, found ${#checksums[@]}" >&2; exit 1; }
+          for arch in amd64 arm64; do
+            archive="applaunchpad-${SNAPSHOT}-cluster-${image_tag}-${arch}.tar.gz"
+            [[ -f "${archive}" && -f "${archive}.md5" ]] || { echo "Missing archive or checksum: ${archive}" >&2; exit 1; }
+            md5sum -c "${archive}.md5"
+          done
+
+          curl --retry 3 -fsSL https://gosspublic.alicdn.com/ossutil/install.sh -o "${RUNNER_TEMP}/install-ossutil.sh"
+          sudo bash "${RUNNER_TEMP}/install-ossutil.sh"
+          command -v ossutil64
+          for file in "${archives[@]}" "${checksums[@]}"; do
+            ossutil64 cp -f -e "${OSS_ENDPOINT}" -i "${OSS_ACCESS_KEY_ID}" -k "${OSS_ACCESS_KEY_SECRET}" \
+              "${file}" "oss://${OSS_BUCKET%/}/${oss_prefix}/${file}"
+          done
