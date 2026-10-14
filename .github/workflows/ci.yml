@@ -102,7 +102,7 @@ jobs:
       - validate
       - release-metadata
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.publish_images == true || inputs.upload_oss == true))
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -115,6 +115,11 @@ jobs:
         arch:
           - amd64
           - arm64
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - name: Select image tag
@@ -130,8 +135,6 @@ jobs:
             release-v5.1) echo "image_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}" ;;
             *) echo "Unsupported snapshot: ${SNAPSHOT}" >&2; exit 1 ;;
           esac
-      - uses: docker/setup-qemu-action@v3
-        if: matrix.arch == 'arm64'
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -146,6 +149,8 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: true
           tags: ${{ env.RUNTIME_IMAGE_NAME }}:${{ steps.image-tag.outputs.image_tag }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=runtime-${{ matrix.snapshot }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=runtime-${{ matrix.snapshot }}-${{ matrix.arch }}
 
   runtime-release:
     needs:
@@ -185,7 +190,7 @@ jobs:
     needs:
       - runtime-release
       - release-metadata
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -198,6 +203,11 @@ jobs:
         arch:
           - amd64
           - arm64
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - name: Select image tag
@@ -214,12 +224,14 @@ jobs:
             *) echo "Unsupported snapshot: ${SNAPSHOT}" >&2; exit 1 ;;
           esac
       - name: Install Sealos
+        env:
+          ARCH: ${{ matrix.arch }}
         shell: bash
         run: |
           set -euo pipefail
           work_dir="$(mktemp -d)"
           curl -fsSL -o "${work_dir}/sealos.tar.gz" \
-            "https://github.com/labring/sealos/releases/download/${SEALOS_VERSION}/sealos_${SEALOS_VERSION#v}_linux_amd64.tar.gz"
+            "https://github.com/labring/sealos/releases/download/${SEALOS_VERSION}/sealos_${SEALOS_VERSION#v}_linux_${ARCH}.tar.gz"
           tar -xzf "${work_dir}/sealos.tar.gz" -C "${work_dir}"
           sudo install "${work_dir}/sealos" /usr/local/bin/sealos
           sealos version
