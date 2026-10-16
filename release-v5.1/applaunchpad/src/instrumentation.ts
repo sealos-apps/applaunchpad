@@ -2,7 +2,6 @@ import type { AppConfigType } from './types';
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const Coin = (await import('@/constants/app')).Coin;
     const yaml = (await import('js-yaml')).default;
     const fs = (await import('node:fs')).default;
     const getGpuNode = (await import('./services/backend/gpu')).getGpuNode;
@@ -45,7 +44,6 @@ export async function register() {
             scripts: []
           },
           gtmId: null,
-          currencySymbol: Coin.shellCoin,
           pvcStorageMax: 20,
           imagePorts: {
             enabled: false,

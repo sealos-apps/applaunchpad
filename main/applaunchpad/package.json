@@ -13,9 +13,7 @@
     "test:components": "vitest --project components",
     "test:components:ci": "vitest run --project components",
     "test:watch": "vitest watch",
-    "test:coverage": "vitest run --coverage",
-    "link-sdk": "rm -rf node_modules/sealos-desktop-sdk && yalc link sealos-desktop-sdk",
-    "unlink-sdk": "yalc remove --all && pnpm install sealos-desktop-sdk"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@chakra-ui/anatomy": "^2.2.1",
@@ -69,7 +67,7 @@
     "react-markdown": "^8.0.7",
     "react-syntax-highlighter": "^15.5.0",
     "sass": "^1.68.0",
-    "sealos-desktop-sdk": "workspace:*",
+    "sealos-desktop-sdk": "npm:@labring/sealos-desktop-sdk@0.1.24",
     "sonner": "^2.0.0",
     "typescript": "^5.2.2",
     "zod": "^4.3.5",

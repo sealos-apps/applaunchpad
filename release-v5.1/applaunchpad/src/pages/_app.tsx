@@ -1,6 +1,7 @@
 import { theme } from '@/constants/theme';
 import { useConfirm } from '@/hooks/useConfirm';
 import { useLoading } from '@/hooks/useLoading';
+import { loadHostConfig } from '@/store/host';
 import { useGlobalStore } from '@/store/global';
 import {
   DESKTOP_DOMAIN,
@@ -66,6 +67,7 @@ const MyApp = ({ Component, pageProps, config }: AppProps & AppOwnProps) => {
 
   useEffect(() => {
     const response = createSealosApp();
+    void loadHostConfig();
     (async () => {
       const { FORM_SLIDER_LIST_CONFIG, DESKTOP_DOMAIN, DISABLE_HTTPS, DOMAIN_PORT, HTTP_PORT } =
         await (() => loadInitData())();

@@ -27,7 +27,6 @@ data:
         api: false
         gpu: false
       ui:
-        currencySymbol: shellCoin
         meta:
           title: "Sealos App Launchpad"
           description: "Deploy and manage your applications on Sealos"

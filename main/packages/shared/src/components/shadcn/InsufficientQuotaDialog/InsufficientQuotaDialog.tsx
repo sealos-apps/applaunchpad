@@ -9,6 +9,8 @@ import type { SupportedLang } from '../../../i18n/quota-dialog';
 export interface InsufficientQuotaDialogProps {
   /** Language for dialog content */
   lang: SupportedLang;
+  /** Reuse host configuration already loaded by the application. */
+  subscriptionEnabled?: boolean;
 }
 
 /**
@@ -16,7 +18,10 @@ export interface InsufficientQuotaDialogProps {
  *
  * @param props - Component props
  */
-export function InsufficientQuotaDialog({ lang }: InsufficientQuotaDialogProps) {
+export function InsufficientQuotaDialog({
+  lang,
+  subscriptionEnabled: hostSubscriptionEnabled
+}: InsufficientQuotaDialogProps) {
   const quotaStore = useQuotaStore();
   const { sealosApp } = useQuotaGuardConfig();
   const [subscriptionEnabled, setSubscriptionEnabled] = useState(true);
@@ -24,6 +29,8 @@ export function InsufficientQuotaDialog({ lang }: InsufficientQuotaDialogProps) 
   const currentSealosAppRef = useRef(sealosApp);
 
   useEffect(() => {
+    if (hostSubscriptionEnabled !== undefined) return;
+
     currentSealosAppRef.current = sealosApp;
 
     if (!sealosApp) {
@@ -56,7 +63,7 @@ export function InsufficientQuotaDialog({ lang }: InsufficientQuotaDialogProps) 
     return () => {
       isMountedRef.current = false;
     };
-  }, [sealosApp]);
+  }, [sealosApp, hostSubscriptionEnabled]);
 
   const handleOpenCostcenter = () => {
     if (!sealosApp) return;
@@ -85,7 +92,7 @@ export function InsufficientQuotaDialog({ lang }: InsufficientQuotaDialogProps) 
     <InsufficientQuotaDialogView
       onOpenCostCenter={handleOpenCostcenter}
       onOpenTickets={openTicketsApp}
-      subscriptionEnabled={subscriptionEnabled}
+      subscriptionEnabled={hostSubscriptionEnabled ?? subscriptionEnabled}
       items={quotaStore.exceededQuotas}
       open={quotaStore.exceededPromptOpen}
       onOpenChange={quotaStore.setExceededPromptOpen}

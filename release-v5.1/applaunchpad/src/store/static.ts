@@ -1,5 +1,4 @@
 import { getInitData } from '@/api/platform';
-import { Coin } from '@/constants/app';
 import type { CustomDomainMode } from '@/types';
 import { normalizeCustomDomainMode } from '@/utils/custom-domain';
 import { resolveNodePortHost } from '@/utils/nodeport-host';
@@ -17,7 +16,6 @@ export let DOMAIN_PORT = '';
 export let HTTP_PORT = '';
 export let DISABLE_HTTPS = false;
 export let SHOW_EVENT_ANALYZE = false;
-export let CURRENCY = Coin.shellCoin;
 export let UPLOAD_LIMIT = 50;
 export let DOWNLOAD_LIMIT = 100;
 export let PVC_STORAGE_MAX = 20;
@@ -45,7 +43,6 @@ export const loadInitData = async () => {
     HTTP_PORT = res.HTTP_PORT;
     DISABLE_HTTPS = res.DISABLE_HTTPS;
     SHOW_EVENT_ANALYZE = res.SHOW_EVENT_ANALYZE;
-    CURRENCY = res.CURRENCY;
     UPLOAD_LIMIT = res.fileMangerConfig.uploadLimit;
     DOWNLOAD_LIMIT = res.fileMangerConfig.downloadLimit;
     DESKTOP_DOMAIN = res.DESKTOP_DOMAIN;
@@ -67,7 +64,6 @@ export const loadInitData = async () => {
       DOMAIN_PORT,
       HTTP_PORT,
       DISABLE_HTTPS,
-      CURRENCY,
       FORM_SLIDER_LIST_CONFIG: res.FORM_SLIDER_LIST_CONFIG,
       DESKTOP_DOMAIN: res.DESKTOP_DOMAIN,
       GPU_ENABLED,

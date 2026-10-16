@@ -20,7 +20,6 @@ export function getClientAppConfigServer() {
     apiEnabled: fullConfig.launchpad.features.api,
     gpuEnabled: fullConfig.launchpad.features.gpu,
     infrastructure: fullConfig.launchpad.infrastructure,
-    currencySymbol: fullConfig.launchpad.ui.currencySymbol,
     pvcStorageMax: fullConfig.launchpad.pvcStorageMax,
     analytics: fullConfig.launchpad.analytics,
     components: fullConfig.launchpad.components,

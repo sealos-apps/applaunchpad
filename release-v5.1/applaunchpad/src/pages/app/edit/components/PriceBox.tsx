@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Box, Center, Flex, useTheme } from '@chakra-ui/react';
 import { useTranslation } from 'next-i18next';
 import { Text, Icon } from '@chakra-ui/react';
-import { CURRENCY } from '@/store/static';
+import { useHostStore } from '@/store/host';
 import { useUserStore } from '@/store/user';
 import MyIcon from '@/components/Icon';
 import { CurrencySymbol, MyTooltip } from '@sealos/ui';
@@ -30,6 +30,7 @@ const PriceBox = ({
   const { t } = useTranslation();
   const { userSourcePrice } = useUserStore();
   const theme = useTheme();
+  const currencySymbol = useHostStore((state) => state.currencySymbol);
 
   const priceList = useMemo(() => {
     if (!userSourcePrice) return [];
@@ -56,7 +57,7 @@ const PriceBox = ({
       const max = (val * pods[1]).toFixed(2);
       return (
         <Flex alignItems={'center'}>
-          <CurrencySymbol type={CURRENCY} />
+          <CurrencySymbol type={currencySymbol} />
           <Text ml="4px">{pods[0] === pods[1] ? `${min}` : `${min} ~ ${max}`}</Text>
         </Flex>
       );
@@ -75,7 +76,7 @@ const PriceBox = ({
       ...(userSourcePrice?.gpu ? [{ label: 'GPU', color: '#89CD11', value: podScale(gpuP) }] : []),
       { label: 'TotalPrice', color: '#485058', value: podScale(totalP) }
     ];
-  }, [cpu, gpu, memory, nodeports, pods, storage, userSourcePrice]);
+  }, [cpu, currencySymbol, gpu, memory, nodeports, pods, storage, userSourcePrice]);
 
   return (
     <Box bg={'#FFF'} borderRadius={'md'} border={theme.borders.base}>

@@ -98,12 +98,6 @@ export const gpuResourceKey = 'nvidia.com/gpu';
 export const templateDeployKey = 'cloud.sealos.io/deploy-on-sealos';
 export const sealafDeployKey = 'sealaf-app';
 
-export enum Coin {
-  cny = 'cny',
-  shellCoin = 'shellCoin',
-  usd = 'usd'
-}
-
 export const AppSourceConfigs: Array<{
   key: string;
   type: TAppSourceType;
