@@ -26,10 +26,9 @@ data:
       networkStorageEnabled: {{ .Values.applaunchpadConfig.networkStorageEnabled }}
     launchpad:
       pvcStorageMax: {{ .Values.applaunchpadConfig.pvcStorageMax }}
-      currencySymbol:  {{ .Values.applaunchpadConfig.currencySymbol | quote }}
       infrastructure:
         provider: alibaba
-        requiresDomainReg:  {{ eq .Values.applaunchpadConfig.currencySymbol "shellCoin"  }}
+        requiresDomainReg:  {{ .Values.applaunchpadConfig.requiresDomainReg }}
         domainRegQueryLink: https://beian.miit.gov.cn/#/Integrated/index
         domainBindingDocumentationLink: null
       eventAnalyze:

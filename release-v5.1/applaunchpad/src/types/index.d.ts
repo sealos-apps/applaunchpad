@@ -1,5 +1,5 @@
 import { WstLogger } from 'sealos-desktop-sdk/service';
-import { Coin, defaultSliderKey } from '@/constants/app';
+import { defaultSliderKey } from '@/constants/app';
 
 export type QueryType = {
   name: string;
@@ -63,7 +63,6 @@ export type AppConfigType = {
       }[];
     };
     gtmId: string | null;
-    currencySymbol: Coin;
     pvcStorageMax: number;
     imagePorts?: {
       enabled?: boolean;
@@ -121,7 +120,6 @@ export type EnvResponse = {
   DOMAIN_BINDING_DOCUMENTATION_LINK: string | null;
   SHOW_EVENT_ANALYZE: boolean;
   FORM_SLIDER_LIST_CONFIG: FormSliderListType;
-  CURRENCY: Coin;
   guideEnabled: boolean;
   fileMangerConfig: FileMangerType;
   SEALOS_USER_DOMAINS: { name: string; secretName: string }[];

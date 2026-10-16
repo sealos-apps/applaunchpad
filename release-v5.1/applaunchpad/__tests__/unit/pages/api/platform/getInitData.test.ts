@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { Coin } from '@/constants/app';
 import { getServerEnv } from '@/pages/api/platform/getInitData';
 import type { AppConfigType } from '@/types';
 
@@ -32,7 +31,6 @@ const createConfig = (): AppConfigType => ({
       scripts: []
     },
     gtmId: null,
-    currencySymbol: Coin.shellCoin,
     pvcStorageMax: 20,
     imagePorts: {
       enabled: false
@@ -58,6 +56,14 @@ const createConfig = (): AppConfigType => ({
 });
 
 describe('getServerEnv', () => {
+  it.each([true, false])('preserves the independent domain registration policy: %s', (required) => {
+    const config = createConfig();
+    config.launchpad.infrastructure.requiresDomainReg = required;
+    const env = getServerEnv(config);
+    expect(env.REQUIRES_DOMAIN_REG).toBe(required);
+    expect(env).not.toHaveProperty('CURRENCY');
+  });
+
   it('returns http-only launchpad config fields', () => {
     const env = getServerEnv(createConfig());
 

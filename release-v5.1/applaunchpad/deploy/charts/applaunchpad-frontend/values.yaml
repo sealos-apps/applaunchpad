@@ -93,7 +93,8 @@ applaunchpadConfig:
   gpuEnabled: false
   networkStorageEnabled: false
   pvcStorageMax: 100
-  currencySymbol: "shellCoin"
+  # Business policy, independent of the Desktop display currency.
+  requiresDomainReg: true
   appResourceFormSliderConfig:
     default:
       cpu: [ 100, 200, 500, 1000, 2000, 3000, 4000, 8000 ]

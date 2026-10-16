@@ -2,6 +2,7 @@
 import { useConfirm } from '@/hooks/useConfirm';
 import { useLoading } from '@/hooks/useLoading';
 import { useClientAppConfig } from '@/hooks/useClientAppConfig';
+import { loadHostConfig, useHostStore } from '@/store/host';
 import { useGlobalStore } from '@/store/global';
 import { useUserStore } from '@/store/user';
 import { getLangStore, setLangStore } from '@/utils/cookieUtils';
@@ -92,6 +93,9 @@ const AppContent = ({ Component, pageProps, title, description }: AppContentProp
     content: 'jump_message'
   });
   const config = useClientAppConfig();
+  const subscriptionEnabled = useHostStore(
+    (state) => state.hostConfig?.features.subscription ?? true
+  );
   const desktopUrl = buildExternalUrl({
     protocol: 'HTTP',
     host: config.desktopDomain,
@@ -108,6 +112,7 @@ const AppContent = ({ Component, pageProps, title, description }: AppContentProp
 
   useEffect(() => {
     const response = createSealosApp();
+    void loadHostConfig();
     (async () => {
       if (config.appResourceFormSliderConfig) {
         initFormSliderList(config.appResourceFormSliderConfig);
@@ -268,7 +273,10 @@ const AppContent = ({ Component, pageProps, title, description }: AppContentProp
       )}
       <QuotaGuardProvider getSession={getSession} sealosApp={sealosApp}>
         <Component {...pageProps} />
-        <InsufficientQuotaDialog lang={(i18n?.language || 'en') as SupportedLang} />
+        <InsufficientQuotaDialog
+          lang={(i18n?.language || 'en') as SupportedLang}
+          subscriptionEnabled={subscriptionEnabled}
+        />
         <ConfirmChild />
         <Loading loading={loading} />
         <Toaster position="top-center" richColors />

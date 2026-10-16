@@ -1,4 +1,3 @@
-import { Coin } from '@/constants/app';
 import { jsonRes } from '@/services/backend/response';
 import type { AppConfigType, EnvResponse } from '@/types';
 import { isCustomPublicDomainPrefixEnabled, isImagePortsEnabled } from '@/utils/feature-gates';
@@ -51,7 +50,6 @@ export const getServerEnv = (AppConfig: AppConfigType): EnvResponse => {
     FORM_SLIDER_LIST_CONFIG: AppConfig.launchpad.appResourceFormSliderConfig,
     guideEnabled: AppConfig.common.guideEnabled,
     fileMangerConfig: AppConfig.launchpad.fileManger,
-    CURRENCY: AppConfig.launchpad.currencySymbol || Coin.shellCoin,
     SEALOS_USER_DOMAINS: AppConfig.cloud.userDomains || [],
     DESKTOP_DOMAIN: AppConfig.cloud.desktopDomain,
     PVC_STORAGE_MAX: AppConfig.launchpad.pvcStorageMax || 20,

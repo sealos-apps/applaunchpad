@@ -120,9 +120,9 @@ SEALOS_DISABLE_HTTPS=${CONFIG_DISABLE_HTTPS:-${SEALOS_DISABLE_HTTPS:-${disableHt
 SEALOS_CERT_SECRET_NAME=${CONFIG_CERT_SECRET_NAME:-${SEALOS_CERT_SECRET_NAME:-${certSecretName:-}}}
 currency="$(read_yaml_file_path '.global.billing.currency')"
 if [[ "${currency}" == "cny" ]]; then
-  CURRENCY_SYMBOL="shellCoin"
+  REQUIRES_DOMAIN_REG=true
 else
-  CURRENCY_SYMBOL="usd"
+  REQUIRES_DOMAIN_REG=false
 fi
 
 add_set_string applaunchpadConfig.cloudDomain "${SEALOS_CLOUD_DOMAIN}"
@@ -131,7 +131,7 @@ add_set_string applaunchpadConfig.httpPort "${SEALOS_HTTP_PORT}"
 add_set_string applaunchpadConfig.disableHttps "${SEALOS_DISABLE_HTTPS}"
 add_set_string applaunchpadConfig.certSecretName "${SEALOS_CERT_SECRET_NAME}"
 add_set_string applaunchpadConfig.jwtInternal "${SEALOS_JWT_INTERNAL:-$(read_jwt_internal)}"
-add_set_string applaunchpadConfig.currencySymbol "${CURRENCY_SYMBOL}"
+add_set_json applaunchpadConfig.requiresDomainReg "${REQUIRES_DOMAIN_REG}"
 
 adopt_namespaced_resource() {
   local namespace="$1"

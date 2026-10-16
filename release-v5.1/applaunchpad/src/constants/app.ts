@@ -102,12 +102,6 @@ export const ownerReferencesKey = 'cloud.sealos.io/owner-references';
 export const ownerReferencesReadyValue = 'ready';
 export const shareStorageKey = 'cloud.sealos.io/share-storage';
 
-export enum Coin {
-  cny = 'cny',
-  shellCoin = 'shellCoin',
-  usd = 'usd'
-}
-
 export const AppSourceConfigs: Array<{
   key: string;
   type: TAppSourceType;

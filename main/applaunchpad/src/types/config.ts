@@ -79,9 +79,6 @@ const FeaturesSchema = z.strictObject({
 });
 
 const UiSchema = z.strictObject({
-  currencySymbol: z
-    .enum(['shellCoin', 'cny', 'usd'])
-    .describe('Currency symbol type for pricing display'),
   meta: MetaSchema.describe('Page meta tags and custom script injection'),
   appResourceFormSliderConfig: z
     .record(z.string(), SliderConfigSchema)
@@ -162,7 +159,6 @@ export const ClientAppConfigSchema = z.strictObject({
     icpRegQueryLink: z.string(),
     domainBindingDocumentationLink: z.string().nullable()
   }),
-  currencySymbol: z.enum(['shellCoin', 'cny', 'usd']),
   pvcStorageMax: z.number(),
   analytics: z.strictObject({
     gtm: z.strictObject({

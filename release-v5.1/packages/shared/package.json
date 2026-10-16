@@ -45,7 +45,7 @@
     "picocolors": "^1.1.1",
     "react": "^18.0 || ^19.0 || ^19.0.0-rc",
     "react-dom": "^18.0 || ^19.0 || ^19.0.0-rc",
-    "sealos-desktop-sdk": "workspace:*",
+    "sealos-desktop-sdk": "npm:@labring/sealos-desktop-sdk@0.1.24",
     "zod": "^3 || ^4",
     "zustand": "^4 || ^5"
   },
@@ -113,7 +113,7 @@
     "picocolors": "^1.1.1",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "sealos-desktop-sdk": "workspace:*",
+    "sealos-desktop-sdk": "npm:@labring/sealos-desktop-sdk@0.1.24",
     "typescript": "^5.9.3",
     "zod": "^4.3.5",
     "zustand": "^4.5.6"
