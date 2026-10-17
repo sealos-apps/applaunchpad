@@ -73,7 +73,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
       }))();
 
-    jsonRes(res);
+    jsonRes(res, { data: { type: 'CNAME', data: expectedPublicDomain } });
   } catch (error: any) {
     console.log('CNAME mismatch error:', error);
     jsonRes(res, {
