@@ -1,3 +1,12 @@
+import {
+  buildPauseData,
+  parsePauseData,
+  type PauseData,
+  shouldRestoreHpa,
+  hasSavedHpa,
+  restoreHPAYaml,
+  resolveStartReplicas
+} from '@/utils/pauseResume';
 import { appDeployKey, pauseKey, minReplicasKey, maxReplicasKey } from '@/constants/app';
 import { formData2Yamls } from '@/pages/app/edit';
 import { serverLoadInitData } from '@/store/static';
@@ -148,33 +157,23 @@ export async function startApp(appName: string, k8s: K8sContext) {
     throw new Error('app is running');
   }
 
-  const pauseData: {
-    target: string;
-    value: string;
-  } = JSON.parse(app.metadata.annotations[pauseKey]);
+  const pauseData = parsePauseData(app.metadata.annotations[pauseKey]);
+  if (!pauseData) throw new Error('Invalid pause data');
 
   delete app.metadata.annotations[pauseKey];
-  app.spec.replicas = app.metadata.annotations[minReplicasKey]
-    ? +app.metadata.annotations[minReplicasKey]
-    : 1;
+  app.spec.replicas = resolveStartReplicas(pauseData, app.metadata.annotations);
 
   const requestQueue: Promise<any>[] = [apiClient.replace(app)];
-  if (pauseData.target) {
-    const hpaYaml = json2HPA({
+  if (shouldRestoreHpa(pauseData)) {
+    const hpaYaml = restoreHPAYaml(
       appName,
-      hpa: {
-        use: true,
-        target: pauseData.target,
-        value: pauseData.value,
-        minReplicas: app.metadata.annotations[minReplicasKey]
-          ? app.metadata.annotations[minReplicasKey]
-          : '1',
-        maxReplicas: app.metadata.annotations[maxReplicasKey]
-          ? app.metadata.annotations[maxReplicasKey]
-          : '2'
-      }
-    } as unknown as AppEditType);
-
+      {
+        minReplicas: app.metadata.annotations[minReplicasKey],
+        maxReplicas: app.metadata.annotations[maxReplicasKey],
+        ...pauseData
+      },
+      app.kind
+    );
     requestQueue.push(applyYamlList([hpaYaml], 'create'));
   }
 
@@ -244,10 +243,9 @@ export async function pauseApp(appName: string, k8s: K8sContext) {
     throw new Error('app data error');
   }
 
-  const restartAnnotations: Record<string, string> = {
-    target: '',
-    value: ''
-  };
+  const previousPauseData = app.metadata.annotations[pauseKey];
+  let pauseData: PauseData = { target: '', value: '' };
+  let foundHpa = false;
 
   const requestQueue: Promise<any>[] = [];
   try {
@@ -256,10 +254,8 @@ export async function pauseApp(appName: string, k8s: K8sContext) {
       namespace
     );
 
-    restartAnnotations.target = hpa?.spec?.metrics?.[0]?.resource?.name || 'cpu';
-    restartAnnotations.value = `${
-      hpa?.spec?.metrics?.[0]?.resource?.target?.averageUtilization || 50
-    }`;
+    pauseData = buildPauseData(hpa, app.kind);
+    foundHpa = true;
 
     requestQueue.push(k8sAutoscaling.deleteNamespacedHorizontalPodAutoscaler(appName, namespace));
   } catch (error: any) {
@@ -318,7 +314,9 @@ export async function pauseApp(appName: string, k8s: K8sContext) {
     }
   }
 
-  app.metadata.annotations[pauseKey] = JSON.stringify(restartAnnotations);
+  if (foundHpa || !hasSavedHpa(previousPauseData)) {
+    app.metadata.annotations[pauseKey] = JSON.stringify(pauseData);
+  }
   app.spec.replicas = 0;
 
   requestQueue.push(apiClient.replace(app));
@@ -515,11 +513,12 @@ export async function updateAppResources(
   }
 
   if (updateData.resource?.replicas !== undefined) {
+    const existingPause = parsePauseData(app.metadata?.annotations?.[pauseKey]);
     if (updateData.resource.replicas === 0) {
-      const restartAnnotations: Record<string, string> = {
-        target: '',
-        value: ''
-      };
+      // Pause: capture the live HPA spec verbatim; on a repeat pause keep the
+      // spec saved by the first one instead of overwriting it with an empty payload.
+      let pauseData: PauseData = { target: '', value: '' };
+      let foundHpa = false;
 
       const requestQueue: Promise<any>[] = [];
 
@@ -528,24 +527,51 @@ export async function updateAppResources(
           appName,
           namespace
         );
-        restartAnnotations.target = hpa?.spec?.metrics?.[0]?.resource?.name || 'cpu';
-        restartAnnotations.value = `${
-          hpa?.spec?.metrics?.[0]?.resource?.target?.averageUtilization || 50
-        }`;
+        pauseData = buildPauseData(hpa, app.kind);
+        foundHpa = true;
         requestQueue.push(
           k8sAutoscaling.deleteNamespacedHorizontalPodAutoscaler(appName, namespace)
         );
       } catch (error: any) {
         if (error?.statusCode !== 404) {
-          throw new Error('无法读取到hpa');
+          throw error;
         }
       }
 
       app.metadata.annotations = app.metadata.annotations || {};
-      app.metadata.annotations[pauseKey] = JSON.stringify(restartAnnotations);
+      if (foundHpa || !hasSavedHpa(app.metadata.annotations[pauseKey])) {
+        app.metadata.annotations[pauseKey] = JSON.stringify(pauseData);
+      }
       app.spec.replicas = 0;
 
       requestQueue.push(apiClient.replace(app));
+      await Promise.all(requestQueue);
+    } else if (shouldRestoreHpa(existingPause)) {
+      // Resume an elastic app: restore the saved HPA unchanged and start at its
+      // minReplicas rather than the literal requested count.
+      const requestQueue: Promise<any>[] = [];
+
+      app.spec.replicas = resolveStartReplicas(existingPause, app.metadata.annotations);
+      app.metadata.annotations = app.metadata.annotations || {};
+      delete app.metadata.annotations[pauseKey];
+
+      requestQueue.push(apiClient.replace(app));
+      requestQueue.push(
+        applyYamlList(
+          [
+            restoreHPAYaml(
+              appName,
+              {
+                minReplicas: app.metadata.annotations[minReplicasKey],
+                maxReplicas: app.metadata.annotations[maxReplicasKey],
+                ...existingPause!
+              },
+              app.kind
+            )
+          ],
+          'create'
+        )
+      );
       await Promise.all(requestQueue);
     } else {
       const requestQueue: Promise<any>[] = [];
@@ -557,7 +583,7 @@ export async function updateAppResources(
         );
       } catch (error: any) {
         if (error?.statusCode !== 404) {
-          throw new Error('Failed to check existing HPA');
+          throw error;
         }
       }
 
@@ -567,14 +593,7 @@ export async function updateAppResources(
       app.metadata.annotations[minReplicasKey] = `${updateData.resource.replicas}`;
       app.metadata.annotations[maxReplicasKey] = `${updateData.resource.replicas}`;
 
-      if (app.metadata?.annotations?.[pauseKey]) {
-        const pauseData: {
-          target: string;
-          value: string;
-        } = JSON.parse(app.metadata.annotations[pauseKey]);
-
-        delete app.metadata.annotations[pauseKey];
-      }
+      delete app.metadata.annotations[pauseKey];
 
       requestQueue.push(apiClient.replace(app));
       await Promise.all(requestQueue);
