@@ -176,8 +176,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
     debugInfo.requestParams = params;
 
-    // Call network monitor service
-    const response = await networkMonitorFetch('/query', params, kubeconfig);
+    // Query VictoriaMetrics through the SDK
+    const response = await networkMonitorFetch(params, kubeconfig);
 
     debugInfo.rawResponse = response;
 

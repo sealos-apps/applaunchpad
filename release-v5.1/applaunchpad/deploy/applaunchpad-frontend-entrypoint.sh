@@ -125,6 +125,7 @@ else
   REQUIRES_DOMAIN_REG=false
 fi
 
+add_set_string applaunchpadConfig.monitorUrl "${METRICS_URL:-${monitorUrl:-}}"
 add_set_string applaunchpadConfig.cloudDomain "${SEALOS_CLOUD_DOMAIN}"
 add_set_string applaunchpadConfig.cloudPort "${SEALOS_CLOUD_PORT}"
 add_set_string applaunchpadConfig.httpPort "${SEALOS_HTTP_PORT}"

@@ -43,6 +43,8 @@ spec:
           image: {{ .Values.image | quote }}
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           env:
+            - name: METRICS_URL
+              value: {{ .Values.applaunchpadConfig.monitorUrl | quote }}
             - name: NODE_TLS_REJECT_UNAUTHORIZED
               value: {{ .Values.applaunchpadConfig.tlsRejectUnauthorized | quote }}
           startupProbe:

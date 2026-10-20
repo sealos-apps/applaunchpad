@@ -12,7 +12,7 @@ const AdapterChartData: Record<
 > = {
   disk: (data: MonitorServiceResult) => {
     const newDataArray = data.data.result.map((item) => {
-      let name = item.metric.pod;
+      let name = item.metric.persistentvolumeclaim;
       let xData = item.values.map((value) => value[0]);
       let yData = item.values.map((value) => parseFloat(value[1]).toFixed(2));
       return {
@@ -146,7 +146,7 @@ const alignMonitorData = (dataArray: MonitorDataResult[]): MonitorDataResult[] =
 export default async function handler(req: NextApiRequest, res: NextApiResponse<ApiResp>) {
   try {
     const kubeconfig = await authSession(req.headers);
-    const { namespace, kc } = await getK8s({
+    const { namespace } = await getK8s({
       kubeconfig: kubeconfig
     });
 
@@ -157,22 +157,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     const startTime = start ? Number(start) : endTime - 60 * 60 * 1000;
 
     const params = {
-      type: queryKey,
-      launchPadName: queryName,
+      type: queryKey as keyof MonitorQueryKey,
+      podName: queryName as string,
       namespace: namespace,
-      start: Math.floor(startTime / 1000),
-      end: Math.floor(endTime / 1000),
-      step: step,
-      ...(pvcName && { pvcName: pvcName })
+      range: {
+        start: Math.floor(startTime / 1000),
+        end: Math.floor(endTime / 1000),
+        step: step as string
+      },
+      ...(pvcName && { pvcName: pvcName as string })
     };
 
-    const result: MonitorDataResult[] = await monitorFetch(
-      {
-        url: '/query',
-        params: params
-      },
-      kubeconfig
-    ).then((res) => {
+    const result: MonitorDataResult[] = await monitorFetch(params, kubeconfig).then((res) => {
       const key = queryKey as keyof MonitorQueryKey;
       const adaptedData = AdapterChartData[key]
         ? AdapterChartData[key](res as MonitorServiceResult)

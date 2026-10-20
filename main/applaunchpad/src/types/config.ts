@@ -87,7 +87,9 @@ const UiSchema = z.strictObject({
 
 const ComponentsSchema = z.strictObject({
   monitoring: z.strictObject({
-    url: z.string()
+    url: z
+      .string()
+      .describe('Direct Prometheus-compatible metrics base URL; overridden by server METRICS_URL')
   }),
   billing: z.strictObject({
     url: z.string()

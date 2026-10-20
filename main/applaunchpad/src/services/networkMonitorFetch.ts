@@ -2,7 +2,8 @@
  * Network Monitor Service - network request count monitor
  */
 
-import { Config } from '@/config';
+import type { LaunchpadQueryResult } from '@labring/sealos-metrics-sdk';
+import { monitorFetch } from './monitorFetch';
 
 export type NetworkMonitorQueryType =
   | 'network_service_request_count'
@@ -40,17 +41,7 @@ export interface NetworkMonitorResultItem {
   values?: [number, string][];
 }
 
-export interface NetworkMonitorServiceResponse {
-  status: string;
-  isPartial: boolean;
-  data: {
-    resultType: 'vector' | 'matrix';
-    result: NetworkMonitorResultItem[];
-  };
-  stats?: {
-    execTime: number;
-  };
-}
+export type NetworkMonitorServiceResponse = LaunchpadQueryResult;
 
 export interface NetworkMonitorDataResult {
   name?: string; // status code class name: 2xx, 3xx, 4xx, 5xx
@@ -69,57 +60,9 @@ export const buildFullServiceName = (serviceName: string, namespace: string): st
  * network monitor data query method
  */
 export const networkMonitorFetch = async (
-  url: string,
   params: NetworkMonitorQueryParams,
   kubeconfig: string
 ): Promise<NetworkMonitorServiceResponse> => {
-  const domain = Config().launchpad.components.monitoring.url;
-
-  // build URL query parameters
-  const queryParams = new URLSearchParams();
-  queryParams.append('namespace', params.namespace);
-  queryParams.append('type', params.type);
-  queryParams.append('service', params.service);
-  queryParams.append('port', String(params.port));
-
-  if (params.start !== undefined) {
-    queryParams.append('start', String(params.start));
-  }
-  if (params.end !== undefined) {
-    queryParams.append('end', String(params.end));
-  }
-  if (params.step) {
-    queryParams.append('step', params.step);
-  }
-  if (params.time !== undefined) {
-    queryParams.append('time', String(params.time));
-  }
-
-  const requestUrl = `${domain}${url}?${queryParams.toString()}`;
-
-  const requestOptions: RequestInit = {
-    method: 'GET',
-    headers: {
-      Authorization: encodeURIComponent(kubeconfig)
-    }
-  };
-
-  try {
-    const response = await fetch(requestUrl, requestOptions);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Error networkMonitorFetch: ${response.status} ${response.statusText} - ${errorText}`
-      );
-    }
-
-    const jsonData = await response.json();
-    return jsonData;
-  } catch (error) {
-    if (process.env.NODE_ENV === 'development') {
-      throw new Error('Please check if network monitor service api is configured' + error);
-    }
-    throw error;
-  }
+  const { start, end, step, time, ...query } = params;
+  return monitorFetch({ ...query, range: { start, end, step, time } }, kubeconfig);
 };

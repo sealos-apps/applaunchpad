@@ -93,18 +93,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     // build request parameters
     const params: MonitorQueryParams = {
       type: queryKey as MonitorQueryType,
-      launchPadName: queryName as string,
+      podName: queryName as string,
       namespace: namespace,
-      start: Math.floor(startTime / 1000),
-      end: Math.floor(endTime / 1000),
-      step: step as string,
+      range: {
+        start: Math.floor(startTime / 1000),
+        end: Math.floor(endTime / 1000),
+        step: step as string
+      },
       ...(pvcName && { pvcName: pvcName as string })
     };
 
     debugInfo.requestParams = params;
 
-    // call monitor service
-    const response = await monitorFetchV2('/query', params, kubeconfig);
+    // Query VictoriaMetrics through the SDK
+    const response = await monitorFetchV2(params, kubeconfig);
 
     debugInfo.rawResponse = response;
 
