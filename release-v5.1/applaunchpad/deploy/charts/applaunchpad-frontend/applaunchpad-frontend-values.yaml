@@ -32,7 +32,8 @@ livenessProbe:
   failureThreshold: 3
 # cloudDomain, cloudPort, httpPort, disableHttps and certSecretName are auto-configured by entrypoint.sh from sealos-config.
 applaunchpadConfig:
-  monitorUrl: "http://launchpad-monitor.sealos.svc.cluster.local:8428"
+  # Direct Prometheus-compatible base URL for metrics-sdk (not launchpad-monitor).
+  monitorUrl: "http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus"
   billingUrl: "http://account-service.account-system.svc:2333"
   logUrl: "http://vlogs.sealos.svc.cluster.local:8428"
   tlsRejectUnauthorized: "1"
