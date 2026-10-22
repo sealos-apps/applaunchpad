@@ -91,11 +91,12 @@ The SDK appends `/api/v1/query` or `/api/v1/query_range` and checks Kubernetes
 readiness and the user's namespace permissions before querying metrics.
 
 Configure the endpoint with Helm `--set-string applaunchpadConfig.monitorUrl=<url>`;
-the Chart writes the mounted YAML and injects server-only `METRICS_URL`. The cluster
-installer also accepts `METRICS_URL=<url>` (preferred over legacy `monitorUrl`),
-with explicit Helm options taking precedence. For a standalone server,
-`METRICS_URL` overrides `launchpad.components.monitoring.url` in main or
-`launchpad.components.monitor.url` in release-v5.1. See each app's `env.template`.
+the Chart writes it into the mounted ConfigMap's `config.yaml`. The server reads
+`launchpad.components.monitoring.url` in main or
+`launchpad.components.monitor.url` in release-v5.1 directly from that file.
+For standalone development, set the same YAML field in the local configuration.
+There is no metrics endpoint environment-variable override. See each app's
+`env.template` for the configuration location.
 
 When upgrading, replace saved/custom `applaunchpadConfig.monitorUrl` values and
 mounted YAML URLs that still point to `launchpad-monitor`; `--reuse-values` alone

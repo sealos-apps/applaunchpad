@@ -115,15 +115,15 @@ describe('SDK monitor API contract', () => {
     await handler(request(), res);
     expect(res.json.mock.calls[0][0].data.result[0].yData).toEqual(['25.00']);
   });
-  it('uses the environment override and creates separate credential-bound clients', async () => {
+  it('uses YAML configuration despite an environment override and creates separate credential-bound clients', async () => {
     vi.stubEnv('METRICS_URL', 'http://override.test');
     await handler(request(), { json: vi.fn() } as any);
     await handler({ ...request(), headers: { authorization: 'second kubeconfig' } }, {
       json: vi.fn()
     } as any);
     expect(clients.mock.calls.map(([options]) => options)).toEqual([
-      { kubeconfig: 'test kubeconfig', metricsURL: 'http://override.test' },
-      { kubeconfig: 'second kubeconfig', metricsURL: 'http://override.test' }
+      { kubeconfig: 'test kubeconfig', metricsURL: 'http://metrics.test' },
+      { kubeconfig: 'second kubeconfig', metricsURL: 'http://metrics.test' }
     ]);
   });
   it('rejects unsupported types before invoking the SDK', async () => {

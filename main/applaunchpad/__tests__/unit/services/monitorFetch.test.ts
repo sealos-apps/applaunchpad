@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { monitorFetch } from '@/services/monitorFetch';
 
 vi.mock('@/config', () => ({
-  Config: () => ({ launchpad: { components: { monitoring: { url: '' } } } })
+  Config: () => ({ launchpad: { components: { monitoring: { url: `${baseURL}/select/0/prometheus` } } } })
 }));
 
 let server: Server;
@@ -65,7 +65,6 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseURL = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  vi.stubEnv('METRICS_URL', `${baseURL}/select/0/prometheus`);
   vi.stubEnv('WHITELIST_KUBERNETES_HOSTS', baseURL);
 });
 beforeEach(() => {

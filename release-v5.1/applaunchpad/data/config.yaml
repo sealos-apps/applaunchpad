@@ -41,7 +41,7 @@ launchpad:
     fastGPTKey: ''
   components:
     monitor:
-      # Direct metrics endpoint; server METRICS_URL overrides this value.
+      # Direct Prometheus-compatible metrics endpoint, configured through the ConfigMap.
       url: http://vmselect-vm-stack-victoria-metrics-k8s-stack.vm.svc.cluster.local:8481/select/0/prometheus
     billing:
       url: 'http://account-service.account-system.svc:2333'

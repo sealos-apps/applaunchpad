@@ -35,8 +35,6 @@ spec:
       containers:
         - name: {{ .Chart.Name }}
           env:
-            - name: METRICS_URL
-              value: {{ .Values.applaunchpadConfig.monitorUrl | quote }}
             - name: NODE_TLS_REJECT_UNAUTHORIZED
               value: {{ .Values.applaunchpadConfig.tlsRejectUnauthorized | quote }}
           securityContext:

@@ -6,7 +6,7 @@ export const monitorFetch = async (params: LaunchpadQueryParams, kubeconfig: str
   // A client is bound to this request's credentials; never share it across users.
   const client = new MetricsClient({
     kubeconfig,
-    metricsURL: process.env.METRICS_URL || Config().launchpad.components.monitoring.url
+    metricsURL: Config().launchpad.components.monitoring.url
   });
   return client.launchpad.query(params);
 };

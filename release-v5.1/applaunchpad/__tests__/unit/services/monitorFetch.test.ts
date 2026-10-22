@@ -2,10 +2,6 @@ import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { monitorFetch } from '@/services/monitorFetch';
 
-vi.mock('@/config', () => ({
-  Config: () => ({ launchpad: { components: { monitoring: { url: '' } } } })
-}));
-
 let server: Server;
 let baseURL: string;
 let allowed = true;
@@ -65,7 +61,9 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseURL = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  vi.stubEnv('METRICS_URL', `${baseURL}/select/0/prometheus`);
+  vi.stubGlobal('AppConfig', {
+    launchpad: { components: { monitor: { url: `${baseURL}/select/0/prometheus` } } }
+  });
   vi.stubEnv('WHITELIST_KUBERNETES_HOSTS', baseURL);
 });
 beforeEach(() => {
@@ -76,6 +74,7 @@ beforeEach(() => {
 });
 afterAll(async () => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   await new Promise<void>((resolve, reject) =>
     server.close((error) => (error ? reject(error) : resolve()))
   );
