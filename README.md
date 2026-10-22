@@ -95,8 +95,7 @@ the Chart writes it into the mounted ConfigMap's `config.yaml`. The server reads
 `launchpad.components.monitoring.url` in main or
 `launchpad.components.monitor.url` in release-v5.1 directly from that file.
 For standalone development, set the same YAML field in the local configuration.
-There is no metrics endpoint environment-variable override. See each app's
-`env.template` for the configuration location.
+There is no metrics endpoint environment-variable override.
 
 When upgrading, replace saved/custom `applaunchpadConfig.monitorUrl` values and
 mounted YAML URLs that still point to `launchpad-monitor`; `--reuse-values` alone
