@@ -2,7 +2,7 @@ import { jsonRes } from '@/services/backend/response';
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 // Public compatibility endpoint for clients using the main configuration contract.
-// Expose only client-facing cloud fields; keep the legacy getInitData endpoint.
+// Expose only client-facing fields; keep the legacy getInitData endpoint.
 function parsePort(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const port = Number(value.replace(/^:/, ''));
@@ -21,7 +21,9 @@ export function getClientAppConfigServer() {
     httpPort: parsePort(cloud.httpPort, 80),
     disableHttps: !!cloud.disableHttps,
     userDomains: cloud.userDomains || [],
-    desktopDomain: cloud.desktopDomain
+    desktopDomain: cloud.desktopDomain,
+    // Match getInitData's PVC_STORAGE_MAX configuration and fallback.
+    pvcStorageMax: global.AppConfig.launchpad.pvcStorageMax || 20
   };
 }
 
