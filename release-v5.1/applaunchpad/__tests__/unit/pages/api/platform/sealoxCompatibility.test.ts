@@ -13,7 +13,10 @@ describe('sealox public configuration', () => {
   it.each([':443', '443', undefined])(
     'returns numeric HTTPS port from %s without credentials',
     async (port) => {
-      vi.stubGlobal('AppConfig', { cloud: { domain: 'apps.test', port, secret: 'private' } });
+      vi.stubGlobal('AppConfig', {
+        cloud: { domain: 'apps.test', port, secret: 'private' },
+        launchpad: {}
+      });
       const res = response();
       await configHandler({} as any, res);
       expect(res.json.mock.calls[0][0]).toMatchObject({
@@ -23,6 +26,23 @@ describe('sealox public configuration', () => {
       expect(res.json.mock.calls[0][0].data).not.toHaveProperty('secret');
     }
   );
+  it.each([
+    [100, 100],
+    [500, 500],
+    [undefined, 20],
+    [0, 20]
+  ])('returns storage limit %s using legacy defaults', async (configured, expected) => {
+    vi.stubGlobal('AppConfig', {
+      cloud: { domain: 'apps.test' },
+      launchpad: { pvcStorageMax: configured }
+    });
+    const res = response();
+    await configHandler({} as any, res);
+    expect(res.json.mock.calls[0][0]).toMatchObject({
+      code: 200,
+      data: { pvcStorageMax: expected }
+    });
+  });
   it('fails when config is missing', async () => {
     vi.stubGlobal('AppConfig', undefined);
     const res = response();
