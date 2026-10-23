@@ -2,6 +2,8 @@ name: AppLaunchpad Images
 
 on:
   push:
+    tags:
+      - "v*"
     branches:
       - main
     paths:
@@ -18,12 +20,12 @@ on:
   workflow_dispatch:
     inputs:
       publish_images:
-        description: Publish runtime and cluster images
+        description: Publish images for branch runs (always enabled for tags)
         required: true
         default: false
         type: boolean
       upload_oss:
-        description: Upload cluster image archives to OSS (also publishes images)
+        description: Upload archives to OSS for branch runs (always enabled for tags; also publishes images)
         required: true
         default: false
         type: boolean
@@ -33,7 +35,7 @@ permissions:
 
 concurrency:
   group: applaunchpad-images-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 env:
   RUNTIME_IMAGE_NAME: ghcr.io/${{ github.repository }}/applaunchpad-frontend
@@ -93,15 +95,24 @@ jobs:
         run: |
           set -euo pipefail
           short_sha="${GITHUB_SHA:0:7}"
-          echo "main_tag=main-${short_sha}" >> "${GITHUB_OUTPUT}"
-          echo "release_tag=release-v5.1-${short_sha}" >> "${GITHUB_OUTPUT}"
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            # Restrict release refs to Docker-compatible semantic versions.
+            [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || {
+              echo "Unsupported release tag: ${GITHUB_REF_NAME}" >&2; exit 1;
+            }
+            echo "main_tag=main-${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+            echo "release_tag=release-v5.1-${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "main_tag=main-${short_sha}" >> "${GITHUB_OUTPUT}"
+            echo "release_tag=release-v5.1-${short_sha}" >> "${GITHUB_OUTPUT}"
+          fi
 
   runtime-images:
     name: Build runtime ${{ matrix.snapshot }} (${{ matrix.arch }})
     needs:
       - validate
       - release-metadata
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.publish_images == true || inputs.upload_oss == true))
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.ref_type == 'tag' || inputs.publish_images == true || inputs.upload_oss == true))
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -176,8 +187,11 @@ jobs:
           publish_manifest() {
             local tag="$1"
             local stable_tag="$2"
-            docker buildx imagetools create -t "${RUNTIME_IMAGE_NAME}:${tag}" \
-              -t "${RUNTIME_IMAGE_NAME}:${stable_tag}" \
+            local aliases=(-t "${RUNTIME_IMAGE_NAME}:${tag}")
+            if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+              aliases+=(-t "${RUNTIME_IMAGE_NAME}:${stable_tag}")
+            fi
+            docker buildx imagetools create "${aliases[@]}" \
               "${RUNTIME_IMAGE_NAME}:${tag}-amd64" \
               "${RUNTIME_IMAGE_NAME}:${tag}-arm64"
             docker buildx imagetools inspect "${RUNTIME_IMAGE_NAME}:${tag}"
@@ -293,8 +307,11 @@ jobs:
           publish_manifest() {
             local tag="$1"
             local stable_tag="$2"
-            docker buildx imagetools create -t "${CLUSTER_IMAGE_NAME}:${tag}" \
-              -t "${CLUSTER_IMAGE_NAME}:${stable_tag}" \
+            local aliases=(-t "${CLUSTER_IMAGE_NAME}:${tag}")
+            if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+              aliases+=(-t "${CLUSTER_IMAGE_NAME}:${stable_tag}")
+            fi
+            docker buildx imagetools create "${aliases[@]}" \
               "${CLUSTER_IMAGE_NAME}:${tag}-amd64" \
               "${CLUSTER_IMAGE_NAME}:${tag}-arm64"
             docker buildx imagetools inspect "${CLUSTER_IMAGE_NAME}:${tag}"
@@ -308,7 +325,7 @@ jobs:
       - cluster-images
       - cluster-release
       - release-metadata
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.upload_oss == true)
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && (github.ref_type == 'tag' || inputs.upload_oss == true))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -345,7 +362,11 @@ jobs:
             *) echo "Unsupported snapshot: ${SNAPSHOT}" >&2; exit 1 ;;
           esac
           short_sha="${GITHUB_SHA:0:7}"
-          oss_prefix="ci/${SNAPSHOT}/${short_sha}"
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            oss_prefix="release/${GITHUB_REF_NAME}/${SNAPSHOT}"
+          else
+            oss_prefix="ci/${SNAPSHOT}/${short_sha}"
+          fi
 
           shopt -s nullglob
           archives=(*.tar.gz)
@@ -365,3 +386,62 @@ jobs:
             ossutil64 cp -f -e "${OSS_ENDPOINT}" -i "${OSS_ACCESS_KEY_ID}" -k "${OSS_ACCESS_KEY_SECRET}" \
               "${file}" "oss://${OSS_BUCKET%/}/${oss_prefix}/${file}"
           done
+
+  github-release:
+    name: Publish GitHub release assets
+    needs:
+      - release-metadata
+      - oss-upload
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cluster-bundle-*
+          path: cluster-bundles
+          merge-multiple: true
+      - name: Verify and publish all release archives
+        working-directory: cluster-bundles
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          MAIN_TAG: ${{ needs.release-metadata.outputs.main_tag }}
+          RELEASE_TAG: ${{ needs.release-metadata.outputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(*.tar.gz)
+          checksums=(*.tar.gz.md5)
+          [[ "${#archives[@]}" -eq 4 && "${#checksums[@]}" -eq 4 ]] || {
+            echo "Expected four archives and four checksums" >&2; exit 1;
+          }
+          for image_tag in "${MAIN_TAG}" "${RELEASE_TAG}"; do
+            for arch in amd64 arm64; do
+              archive="applaunchpad-cluster-${image_tag}-${arch}.tar.gz"
+              [[ -f "${archive}" && -f "${archive}.md5" ]]
+              md5sum -c "${archive}.md5"
+            done
+          done
+
+          release_flags=(--prerelease=false)
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            release_flags=(--prerelease --latest=false)
+          fi
+          if ! gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" --verify-tag --draft \
+              --title "${GITHUB_REF_NAME}" --generate-notes "${release_flags[@]}"
+          fi
+          gh release upload "${GITHUB_REF_NAME}" "${archives[@]}" "${checksums[@]}" --clobber
+
+          # Read back every uploaded asset's digest before publishing the draft.
+          gh release view "${GITHUB_REF_NAME}" --json assets > assets.json
+          for file in "${archives[@]}" "${checksums[@]}"; do
+            digest="sha256:$(sha256sum "${file}" | cut -d ' ' -f 1)"
+            jq -e --arg name "${file}" --arg digest "${digest}" \
+              '[.assets[] | select(.name == $name and .state == "uploaded" and .digest == $digest)] | length == 1' \
+              assets.json >/dev/null
+          done
+          gh release edit "${GITHUB_REF_NAME}" --draft=false "${release_flags[@]}"

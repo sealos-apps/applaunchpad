@@ -34,6 +34,57 @@ Each archive has a matching `.tar.gz.md5` file. Snapshots are `main` and
 `release-v5.1`; architectures are `amd64` and `arm64`. The upload checks that both
 architecture archives exist and verifies their checksums before uploading.
 
+## Version releases
+
+Push a version tag such as `v5.2.0-beta2` **after the release workflow is included
+in that commit**. The workflow validates both snapshots, builds and publishes
+`linux/amd64` and `linux/arm64` runtime and cluster images, uploads the offline
+archives to OSS, then attaches all four archives and their four MD5 files to the
+GitHub Release. A new Release stays in draft until the uploaded SHA-256 digests
+match the local files. Tags with a prerelease suffix (such as `-beta2` or `-rc1`)
+are marked as prereleases and are not marked as the latest GitHub Release.
+
+Supported tags are `v<major>.<minor>.<patch>` with an optional alphanumeric
+prerelease suffix separated by dots or hyphens; build metadata (`+...`) is not
+supported because Docker tags cannot contain `+`.
+
+For `v5.2.0-beta2`, both GHCR image repositories use these tags:
+
+- `main-v5.2.0-beta2`
+- `release-v5.1-v5.2.0-beta2`
+
+Each is a multi-platform manifest; architecture-specific tags append `-amd64`
+or `-arm64`. Version releases do not change `latest` or `release-v5.1-latest`;
+those aliases are updated only by builds on the `main` branch.
+
+Release archives keep the snapshot and version in their names:
+
+```text
+applaunchpad-cluster-<snapshot>-<tag>-<arch>.tar.gz
+oss://<OSS_BUCKET>/release/<tag>/<snapshot>/applaunchpad-cluster-<snapshot>-<tag>-<arch>.tar.gz
+```
+
+The workflow reuses the existing OSS secrets and `OSS_BUCKET` variable described
+above. GitHub authentication uses the automatically supplied `GITHUB_TOKEN`
+(passed to `gh` as `GH_TOKEN`); `GH_REPO` selects the current repository.
+Only the GitHub release job has `contents: write`; image jobs retain
+`packages: write`. No new operator credentials or application environment
+variables are required.
+
+To retry a version release, rerun its failed Actions jobs, or dispatch
+**AppLaunchpad Images** with the tag as the ref:
+
+```sh
+gh workflow run ci.yml --ref v5.2.0-beta2
+```
+
+For tag refs, image publishing and OSS upload are always enabled, regardless of
+the two manual boolean inputs (which still default to false for branch refs).
+Reruns replace same-named Release attachments, preserve existing release notes,
+and verify the uploaded digests again. Tag runs are not cancelled by a newer run.
+Workflow changes do not apply retroactively to old tags: `v5.2.0-beta1` keeps its
+manually attached SHA-named archives and must not be moved to adopt this workflow.
+
 ## Currency display upgrade (both snapshots)
 
 AppLaunchpad now uses `@labring/sealos-desktop-sdk@0.1.24` (installed under the
