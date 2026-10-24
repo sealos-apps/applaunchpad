@@ -27,7 +27,15 @@ export type userPriceType = {
   cpu: number;
   memory: number;
   storage: number;
-  gpu?: { alias: string; type: string; price: number; inventory: number; vm: number }[];
+  gpu?: {
+    alias: string;
+    type: string;
+    price: number;
+    inventory: number;
+    vm: number;
+    resource?: { card: string };
+    manufacturers?: string;
+  }[];
   nodeports: number;
 };
 

@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { GET } from '@/services/request';
 import React from 'react';
 import {
   Dialog,
@@ -24,6 +26,12 @@ const ErrorModal = ({
   errorCode?: ResponseCode;
 }) => {
   const { t } = useTranslation();
+  const { data: payment } = useQuery(
+    ['payment-config'],
+    () => GET<{ paymentEnabled: boolean }>('/api/platform/paymentConfig'),
+    { retry: false }
+  );
+  const canRecharge = errorCode === ResponseCode.BALANCE_NOT_ENOUGH && payment?.paymentEnabled;
 
   const openCostCenterApp = () => {
     sealosApp.runEvents('openDesktopApp', {
@@ -59,13 +67,13 @@ const ErrorModal = ({
             size="lg"
             className="shadow-none"
             onClick={() => {
-              if (errorCode === ResponseCode.BALANCE_NOT_ENOUGH) {
+              if (canRecharge) {
                 openCostCenterApp();
               }
               onClose();
             }}
           >
-            {errorCode === ResponseCode.BALANCE_NOT_ENOUGH ? t('add_credit') : t('Confirm')}
+            {canRecharge ? t('add_credit') : t('Confirm')}
           </Button>
         </DialogFooter>
       </DialogContent>

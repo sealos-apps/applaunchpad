@@ -1,3 +1,4 @@
+import { toVlogsQueryTime } from '@/utils/vlogsTime';
 import { authSession } from '@/services/backend/auth';
 import { getK8s } from '@/services/backend/kubernetes';
 import { jsonRes } from '@/services/backend/response';
@@ -11,8 +12,8 @@ export interface PodListQueryPayload {
   time?: string;
   namespace?: string;
   podQuery?: string;
-  startTime?: string;
-  endTime?: string;
+  startTime?: string | number;
+  endTime?: string | number;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse<ApiResp>) {
@@ -57,7 +58,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       namespace: namespace,
       app: app,
       podQuery: podQuery,
-      ...(startTime && endTime ? { startTime, endTime } : { time })
+      ...(startTime !== undefined && endTime !== undefined
+        ? { startTime: toVlogsQueryTime(startTime), endTime: toVlogsQueryTime(endTime) }
+        : { time })
     };
 
     console.log(params, 'params');

@@ -8,8 +8,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { RequestController, isElementInViewport } from '@/utils/tools';
 import AppList from '@/components/apps/appList';
 import { useGuideStore } from '@/store/guide';
+import { useUserStore } from '@/store/user';
 
 const Home = () => {
+  const sessionReady = useUserStore((state) => !!state.session?.kubeconfig);
   const router = useRouter();
   const { appList, setAppList, intervalLoadPods, loadAvgMonitorData } = useAppStore();
   const { Loading } = useLoading();
@@ -29,6 +31,7 @@ const Home = () => {
     ['appListQuery'],
     () => setAppList(false),
     {
+      enabled: sessionReady,
       onSettled(res) {
         if (!res) return;
         refreshList(res);

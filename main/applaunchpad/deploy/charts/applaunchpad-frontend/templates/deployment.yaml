@@ -19,11 +19,13 @@ spec:
     metadata:
       labels:
         {{- include "applaunchpad-frontend.labels" . | nindent 8 }}
-      {{- with .Values.podAnnotations }}
       annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
     spec:
+      serviceAccountName: {{ include "applaunchpad-frontend.serviceAccountName" . }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -42,6 +44,16 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           image: {{ .Values.image | quote }}
+          startupProbe:
+            httpGet: { path: /healthz, port: 3000 }
+            periodSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 3000 }
+            periodSeconds: 20
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           volumeMounts:
             - mountPath: /app/data/config.yaml

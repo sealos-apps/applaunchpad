@@ -12,7 +12,21 @@ export async function getGpuNode() {
     const { body } = await kc.makeApiClient(CoreV1Api).readNamespacedConfigMap(gpuCrName, gpuCrNS);
     const gpuMap = body?.data?.gpu;
     if (!gpuMap || !body?.data?.alias) return [];
-    const alias = (JSON.parse(body?.data?.alias) || {}) as Record<string, string>;
+
+    const aliasConfig = (JSON.parse(body?.data?.alias) || {}) as Record<
+      string,
+      {
+        default: string;
+        icon?: string;
+        name?: {
+          zh: string;
+          en: string;
+        };
+        resource?: {
+          card: string;
+        };
+      }
+    >;
 
     const parseGpuMap = JSON.parse(gpuMap) as Record<
       string,
@@ -22,30 +36,28 @@ export async function getGpuNode() {
         'gpu.product': string;
         'gpu.available': string;
         'gpu.used': string;
+        'gpu.ref': string;
       }
     >;
 
-    const gpuValues = Object.values(parseGpuMap).filter((item) => item['gpu.product']);
+    const gpuEntries = Object.entries(parseGpuMap).filter(([_, item]) => item['gpu.product']);
 
-    const gpuList: GpuNodeType[] = [];
-
-    // merge same type gpu
-    gpuValues.forEach((item) => {
-      const index = gpuList.findIndex((gpu) => gpu['gpu.product'] === item['gpu.product']);
-      if (index > -1) {
-        gpuList[index]['gpu.count'] += Number(item['gpu.count']);
-        gpuList[index]['gpu.available'] += Number(item['gpu.available']);
-        gpuList[index]['gpu.used'] += Number(item['gpu.used']);
-      } else {
-        gpuList.push({
-          ['gpu.count']: +item['gpu.count'],
-          ['gpu.memory']: +item['gpu.memory'],
-          ['gpu.product']: item['gpu.product'],
-          ['gpu.alias']: alias[item['gpu.product']] || item['gpu.product'],
-          ['gpu.available']: +item['gpu.available'],
-          ['gpu.used']: +item['gpu.used']
-        });
-      }
+    const gpuList: GpuNodeType[] = gpuEntries.map(([nodeKey, item]) => {
+      const rawConfig = aliasConfig[item['gpu.ref']];
+      const config = typeof rawConfig === 'string' ? { default: rawConfig } : rawConfig;
+      return {
+        ['gpu.count']: +item['gpu.count'],
+        ['gpu.memory']: +item['gpu.memory'],
+        ['gpu.product']: item['gpu.product'],
+        ['gpu.alias']: config?.default || item['gpu.product'],
+        ['gpu.available']: +item['gpu.available'],
+        ['gpu.used']: +item['gpu.used'],
+        ['gpu.ref']: item['gpu.ref'],
+        icon: config?.icon,
+        name: config?.name,
+        resource: config?.resource,
+        nodeName: nodeKey
+      };
     });
 
     return gpuList;

@@ -141,23 +141,12 @@ export const StandardEnvSchema = z
       description: 'Environment variable value',
       example: 'postgres://user:pass@host:5432/db'
     }),
-    valueFrom: z
-      .object({
-        secretKeyRef: z.object({
-          key: z.string().openapi({
-            description: 'Key within the secret',
-            example: 'database-url'
-          }),
-          name: z.string().openapi({
-            description: 'Name of the Kubernetes Secret',
-            example: 'my-app-secrets'
-          })
-        })
-      })
-      .optional()
-      .openapi({
-        description: 'Reference to secret for the value'
-      })
+    valueFrom: z.object({
+      secretKeyRef: z.object({ name: z.string(), key: z.string(), optional: z.boolean().optional() }).optional(),
+      configMapKeyRef: z.object({ name: z.string(), key: z.string(), optional: z.boolean().optional() }).optional(),
+      fieldRef: z.object({ apiVersion: z.string().optional(), fieldPath: z.string() }).optional(),
+      resourceFieldRef: z.object({ containerName: z.string().optional(), resource: z.string(), divisor: z.string().optional() }).optional()
+    }).optional().openapi({ description: 'Kubernetes environment value source' })
   })
   .openapi({
     description: 'Environment variable configuration'
@@ -203,6 +192,9 @@ export const StandardConfigMapSchema = z
 
 export const PortConfigSchema = z
   .object({
+    accessMode: z.enum(['domain', 'nodePort']).optional(),
+    publicDomain: z.string().optional(),
+
     number: z.number().openapi({
       description: 'Port number',
       example: 8080
@@ -232,6 +224,14 @@ export const PortConfigSchema = z
     description: 'Port configuration details'
   });
 
+// Responses describe existing Kubernetes workloads, including values outside create-form presets.
+const ResourceResponseSchema = z.object({
+  ...ResourceSchema.shape,
+  cpu: z.number().nonnegative(),
+  memory: z.number().nonnegative(),
+  replicas: z.number().int().nonnegative().optional()
+});
+
 export const LaunchpadApplicationSchema = z
   .object({
     name: z.string().openapi({ description: 'Application name', example: 'web-api' }),
@@ -239,7 +239,7 @@ export const LaunchpadApplicationSchema = z
     launchCommand: LaunchCommandSchema.optional().openapi({
       description: 'Container launch command configuration'
     }),
-    quota: ResourceSchema.openapi({ description: 'Resource quota and scaling configuration' }),
+    quota: ResourceResponseSchema.openapi({ description: 'Resource quota and scaling configuration' }),
     ports: z.array(PortConfigSchema).optional().openapi({
       description: 'Port/network configurations with runtime addresses'
     }),

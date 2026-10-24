@@ -11,6 +11,11 @@ export function getClientAppConfigServer() {
   const fullConfig = Config();
   return validateClientAppConfigOrThrow(ClientAppConfigSchema, {
     domain: fullConfig.cloud.domain,
+    nodePortHost: fullConfig.cloud.nodePortHost,
+    networkStorageEnabled: fullConfig.launchpad.features.networkStorage,
+    imagePorts: fullConfig.launchpad.imagePorts,
+    publicDomain: fullConfig.launchpad.publicDomain,
+    customDomain: fullConfig.launchpad.customDomain,
     port: fullConfig.cloud.port,
     httpPort: fullConfig.cloud.httpPort,
     disableHttps: fullConfig.cloud.disableHttps,
@@ -22,7 +27,15 @@ export function getClientAppConfigServer() {
     infrastructure: fullConfig.launchpad.infrastructure,
     pvcStorageMax: fullConfig.launchpad.pvcStorageMax,
     analytics: fullConfig.launchpad.analytics,
-    components: fullConfig.launchpad.components,
+    components: {
+      monitoring: fullConfig.launchpad.components.monitoring,
+      billing: fullConfig.launchpad.components.billing,
+      logging: fullConfig.launchpad.components.logging,
+      eventAnalysis: {
+        enabled: fullConfig.launchpad.components.eventAnalysis.enabled,
+        url: fullConfig.launchpad.components.eventAnalysis.url
+      }
+    },
     appResourceFormSliderConfig: fullConfig.launchpad.ui.appResourceFormSliderConfig,
     fileManager: fullConfig.launchpad.fileManager,
     meta: {

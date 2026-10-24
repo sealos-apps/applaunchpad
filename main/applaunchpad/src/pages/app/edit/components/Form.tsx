@@ -51,6 +51,7 @@ import type { ConfigMapType } from './ConfigmapModal';
 import PriceBox from './PriceBox';
 import QuotaBox from './QuotaBox';
 import type { StoreType } from './StoreModal';
+import AdditionalCapabilities from './AdditionalCapabilities';
 import { NetworkSection } from './NetworkSection';
 import { mountPathToConfigMapKey } from '@/utils/tools';
 import {
@@ -866,6 +867,11 @@ const Form = ({
                         const inventory = countGpuInventory(actualType);
                         if (actualType === '' || (selected && inventory > 0)) {
                           setValue('gpu.type', actualType);
+                          const selected = userSourcePrice?.gpu?.find(
+                            (gpu) => gpu.type === actualType
+                          );
+                          setValue('gpu.resource', selected?.resource);
+                          setValue('gpu.manufacturers', selected?.manufacturers || 'nvidia');
                           const sliderList = countSliderList();
                           setValue('cpu', cpuMillicoresToQuantity(sliderList.cpu[1].value));
                           setValue('memory', memoryMiToQuantity(sliderList.memory[1].value));
@@ -1080,6 +1086,7 @@ const Form = ({
           </Card>
 
           {/* network */}
+          <AdditionalCapabilities formHook={formHook} />
           <NetworkSection
             formHook={formHook}
             exceededQuotas={exceededQuotas}

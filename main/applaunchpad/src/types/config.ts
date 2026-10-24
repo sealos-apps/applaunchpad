@@ -7,8 +7,15 @@ const UserDomainSchema = z.strictObject({
 
 const CloudSchema = z.strictObject({
   domain: z.string().describe('Main promoted domain'),
-  port: z.number().describe('Port number, e.g. 443'),
-  httpPort: z.number().optional().describe('HTTP port number used when HTTPS is disabled'),
+  nodePortHost: z.string().optional(),
+  port: z.number().int().min(1).max(65535).describe('Port number, e.g. 443'),
+  httpPort: z
+    .number()
+    .int()
+    .min(1)
+    .max(65535)
+    .optional()
+    .describe('HTTP port number used when HTTPS is disabled'),
   disableHttps: z.boolean().default(false).describe('Whether public application URLs use HTTP'),
   userDomains: z.array(UserDomainSchema).describe('List of domains available for users'),
   desktopDomain: z.string().describe('Domain for the desktop application')
@@ -42,7 +49,8 @@ const MetaSchema = z.strictObject({
 
 const SliderConfigSchema = z.strictObject({
   cpu: z.array(z.number()),
-  memory: z.array(z.number())
+  memory: z.array(z.number()),
+  ephemeralStorage: z.array(z.number()).optional()
 });
 
 const EventAnalysisSchema = z.strictObject({
@@ -69,6 +77,7 @@ const AnalyticsSchema = z.strictObject({
 });
 
 const FeaturesSchema = z.strictObject({
+  networkStorage: z.boolean().optional(),
   guide: z.boolean().describe('Whether the interactive guide feature is enabled'),
   api: z.boolean().describe('Whether the public API feature is enabled'),
   gpu: z
@@ -124,7 +133,25 @@ const LaunchpadSchema = z.strictObject({
   analytics: AnalyticsSchema,
   components: ComponentsSchema,
   fileManager: FileManagerSchema,
-  checkIcpReg: CheckIcpRegSchema
+  checkIcpReg: CheckIcpRegSchema,
+  imagePorts: z
+    .strictObject({
+      enabled: z.boolean().optional(),
+      trustedRegistries: z.array(z.string()).optional()
+    })
+    .optional(),
+  publicDomain: z
+    .strictObject({
+      customPrefixEnabled: z.boolean().optional(),
+      reservedPrefixes: z.array(z.string()).optional()
+    })
+    .optional(),
+  customDomain: z
+    .strictObject({
+      mode: z.enum(['cname', 'certificate']).optional(),
+      certificate: z.strictObject({ tlsSecretName: z.string().optional() }).optional()
+    })
+    .optional()
 });
 
 /**
@@ -146,6 +173,11 @@ export type FormSliderListType = Record<string, SliderConfig>;
  * Excludes sensitive server-side secrets (e.g. checkIcpReg credentials).
  */
 export const ClientAppConfigSchema = z.strictObject({
+  nodePortHost: z.string().optional(),
+  networkStorageEnabled: z.boolean().optional(),
+  imagePorts: LaunchpadSchema.shape.imagePorts,
+  publicDomain: LaunchpadSchema.shape.publicDomain,
+  customDomain: LaunchpadSchema.shape.customDomain,
   domain: z.string(),
   port: z.number(),
   httpPort: z.number().optional(),
@@ -180,8 +212,7 @@ export const ClientAppConfigSchema = z.strictObject({
     logging: z.strictObject({ url: z.string(), enabled: z.boolean() }),
     eventAnalysis: z.strictObject({
       enabled: z.boolean(),
-      url: z.string(),
-      fastGPTKey: z.string()
+      url: z.string()
     })
   }),
   appResourceFormSliderConfig: z.record(z.string(), SliderConfigSchema),

@@ -1,3 +1,5 @@
+import yaml from 'js-yaml';
+import { updateStatefulSet } from '@/services/backend/statefulSetUpdate';
 import { NextApiRequest, NextApiResponse } from 'next';
 import { jsonRes } from '@/services/backend/response';
 import { createK8sContext, getAppByName, processAppResponse } from '@/services/backend';
@@ -28,13 +30,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const { storage } = parseResult.data;
-
-    if (storage.length === 0) {
-      return jsonRes(res, {
-        code: 400,
-        error: 'At least one storage configuration is required'
-      });
-    }
 
     const paths = storage.map((s) => s.path);
 
@@ -80,6 +75,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
+    if (storage.length === 0) return jsonRes(res, { message: 'Storage unchanged' });
+
     try {
       const updatedAppData: AppEditType = { ...currentAppData };
 
@@ -90,7 +87,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       for (const newStore of storage) {
         const storeItem = {
-          name: mountPathToConfigMapKey(newStore.path),
+          ...existingStorageByPath.get(newStore.path),
+          name:
+            existingStorageByPath.get(newStore.path)?.name ||
+            mountPathToConfigMapKey(newStore.path),
           path: newStore.path,
           value: parseK8sQuantityOrZero(newStore.size)
         };
@@ -111,23 +111,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const { k8sCore, k8sApp, namespace, applyYamlList } = k8s;
 
-      await k8sApp.deleteNamespacedStatefulSet(
-        appName,
-        namespace,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined
-      );
-      await applyYamlList([newStatefulSetYaml], 'create');
+      await updateStatefulSet(k8sApp, namespace, yaml.load(newStatefulSetYaml) as any);
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
 
       try {
         await updateExistingPVCs(k8sCore, namespace, appName, storage);
       } catch (pvcError: any) {
-        console.error('PVC updates failed after StatefulSet recreation:', pvcError.message);
+        throw pvcError;
       }
 
       const response = await getAppByName(appName, k8s);

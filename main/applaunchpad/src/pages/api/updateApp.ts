@@ -1,3 +1,6 @@
+import { removeConvertedController } from '@/services/backend/workloadConversion';
+import { ensureResourcePublicDomainsAvailable } from '@/services/backend/publicDomain';
+import { updateStatefulSet } from '@/services/backend/statefulSetUpdate';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ApiResp } from '@/services/kubernet';
 import { jsonRes } from '@/services/backend/response';
@@ -120,6 +123,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       namespace
     } = await initK8s({ req });
 
+    await ensureResourcePublicDomainsAvailable(
+      patch.flatMap((item) =>
+        item.type === 'delete'
+          ? []
+          : [typeof item.value === 'string' ? yaml.load(item.value) : item.value]
+      ),
+      { k8sNetworkingApp, namespace }
+    );
+
     const crMap: Record<
       `${YamlKindEnum}`,
       {
@@ -140,34 +152,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
             undefined,
             { headers: { 'Content-type': PatchUtils.PATCH_FORMAT_JSON_MERGE_PATCH } }
           ),
-        delete: (name) => k8sApp.deleteNamespacedDeployment(name, namespace)
+        delete: (name) =>
+          patch.some((item) => item.type === 'create' && item.kind === 'StatefulSet')
+            ? removeConvertedController(k8sApp, k8sCore, namespace, name, 'Deployment')
+            : k8sApp.deleteNamespacedDeployment(name, namespace)
       },
       [YamlKindEnum.StatefulSet]: {
-        patch: async (jsonPatch: Object) => {
-          // patch -> replace -> delete and create
-          try {
-            await k8sApp.patchNamespacedStatefulSet(
-              appName,
-              namespace,
-              jsonPatch,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              { headers: { 'Content-type': PatchUtils.PATCH_FORMAT_JSON_MERGE_PATCH } }
-            );
-          } catch (error) {
-            try {
-              await k8sApp.replaceNamespacedStatefulSet(appName, namespace, jsonPatch);
-            } catch (error) {
-              warnLog('delete and create statefulSet', { yaml: yaml.dump(jsonPatch) });
-              await k8sApp.deleteNamespacedStatefulSet(appName, namespace);
-              await k8sApp.createNamespacedStatefulSet(namespace, jsonPatch);
-            }
-          }
-        },
-        delete: (name) => k8sApp.deleteNamespacedStatefulSet(name, namespace)
+        patch: (jsonPatch: V1StatefulSet) => updateStatefulSet(k8sApp, namespace, jsonPatch),
+        delete: (name) =>
+          patch.some((item) => item.type === 'create' && item.kind === 'Deployment')
+            ? removeConvertedController(k8sApp, k8sCore, namespace, name, 'StatefulSet')
+            : k8sApp.deleteNamespacedStatefulSet(name, namespace)
       },
       [YamlKindEnum.Service]: {
         patch: (jsonPatch: V1Service) =>
@@ -309,8 +304,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
         // check whether delete
         if (!volume) {
-          infoLog(`delete pvc: ${pvc.metadata?.name}`);
-          return k8sCore.deleteNamespacedPersistentVolumeClaim(pvc.metadata?.name || '', namespace);
+          return; // Unmounting never transfers ownership or implies deleting the PVC.
         }
         // check storage change
         const currentStorageQuantity = storageAnnotationToQuantity(

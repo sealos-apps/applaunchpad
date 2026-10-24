@@ -1,3 +1,6 @@
+import { convertDeploymentToStatefulSet } from '@/services/backend/workloadConversion';
+import yaml from 'js-yaml';
+import { updateStatefulSet } from '@/services/backend/statefulSetUpdate';
 import {
   GetAppByAppNameQuerySchema,
   DeleteAppByNameQuerySchema,
@@ -274,7 +277,10 @@ async function updateServiceAndIngress(appEditData: AppEditType, applyYamlList: 
 
     if (hasIngressPorts) {
       const ingressYaml = json2Ingress(appEditData, Config().cloud.userDomains, {
-        disableHttps: Config().cloud.disableHttps
+        disableHttps: Config().cloud.disableHttps,
+        customDomainMode: Config().launchpad.customDomain?.mode,
+        customDomainCertificateSecretName:
+          Config().launchpad.customDomain?.certificate?.tlsSecretName
       });
       if (ingressYaml.trim()) {
         yamlList.push(ingressYaml);
@@ -318,7 +324,10 @@ async function updateStorage(
 
     for (const newStore of storageData) {
       updatedAppData.storeList.push({
-        name: mountPathToConfigMapKey(newStore.path),
+        ...currentAppData.storeList.find((store) => store.path === newStore.path),
+        name:
+          currentAppData.storeList.find((store) => store.path === newStore.path)?.name ||
+          mountPathToConfigMapKey(newStore.path),
         path: newStore.path,
         value: parseK8sQuantityOrZero(newStore.size)
       });
@@ -326,113 +335,13 @@ async function updateStorage(
 
     const newStatefulSetYaml = json2DeployCr(updatedAppData, 'statefulset');
 
-    try {
-      await k8sApp.deleteNamespacedDeployment(appName, namespace);
-    } catch (error: any) {
-      if (error.response?.statusCode !== 404) {
-        throw new Error(`Failed to delete Deployment: ${error.message}`);
-      }
-    }
-
-    try {
-      await k8sCore.deleteCollectionNamespacedService(
-        namespace,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        `${appDeployKey}=${appName}`
-      );
-    } catch (error: any) {
-      if (error.response?.statusCode !== 404) {
-        console.warn('Failed to delete old services:', error.message);
-      }
-    }
-
-    try {
-      await k8sNetworkingApp.deleteCollectionNamespacedIngress(
-        namespace,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        `${appDeployKey}=${appName}`
-      );
-    } catch (error: any) {
-      if (error.response?.statusCode !== 404) {
-        console.warn('Failed to delete old ingresses:', error.message);
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-
-    const yamlList = [newStatefulSetYaml];
-
-    const hasServicePorts = updatedAppData.networks && updatedAppData.networks.length > 0;
-
-    if (hasServicePorts) {
-      const serviceYaml = json2Service(updatedAppData);
-      if (serviceYaml.trim()) {
-        yamlList.push(serviceYaml);
-      }
-
-      const hasIngressPorts = updatedAppData.networks.some(
-        (network) => network.openPublicDomain && !network.openNodePort
-      );
-
-      if (hasIngressPorts) {
-        const ingressYaml = json2Ingress(updatedAppData, Config().cloud.userDomains, {
-          disableHttps: Config().cloud.disableHttps
-        });
-        if (ingressYaml.trim()) {
-          yamlList.push(ingressYaml);
-        }
-      }
-    }
-
-    await applyYamlList(yamlList, 'create');
+    await convertDeploymentToStatefulSet(k8s, yaml.load(newStatefulSetYaml));
 
     return;
   }
 
-  if (currentAppData.kind === 'statefulset' && (!storageData || storageData.length === 0)) {
-    const updatedAppData: AppEditType = { ...currentAppData };
-    updatedAppData.storeList = [];
-
-    const newStatefulSetYaml = json2DeployCr(updatedAppData, 'statefulset');
-
-    await k8sApp.deleteNamespacedStatefulSet(
-      appName,
-      namespace,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    await applyYamlList([newStatefulSetYaml], 'create');
-
-    try {
-      await k8sCore.deleteCollectionNamespacedPersistentVolumeClaim(
-        namespace,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        `app=${appName}`
-      );
-    } catch (error: any) {
-      // Ignore PVC deletion errors
-    }
-
-    return;
-  }
+  // Empty storage updates preserve existing mounts and underlying data.
+  if (!storageData?.length) return;
 
   if (currentAppData.kind === 'statefulset') {
     const paths = storageData.map((s) => s.path);
@@ -457,7 +366,10 @@ async function updateStorage(
 
     for (const newStore of storageData) {
       updatedAppData.storeList.push({
-        name: mountPathToConfigMapKey(newStore.path),
+        ...currentAppData.storeList.find((store) => store.path === newStore.path),
+        name:
+          currentAppData.storeList.find((store) => store.path === newStore.path)?.name ||
+          mountPathToConfigMapKey(newStore.path),
         path: newStore.path,
         value: parseK8sQuantityOrZero(newStore.size)
       });
@@ -465,26 +377,14 @@ async function updateStorage(
 
     const newStatefulSetYaml = json2DeployCr(updatedAppData, 'statefulset');
 
-    await k8sApp.deleteNamespacedStatefulSet(
-      appName,
-      namespace,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    await applyYamlList([newStatefulSetYaml], 'create');
+    await updateStatefulSet(k8sApp, namespace, yaml.load(newStatefulSetYaml) as any);
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     try {
       await updateExistingPVCs(k8sCore, namespace, appName, storageData);
     } catch (pvcError: any) {
-      console.error('PVC update error:', pvcError);
+      throw pvcError;
     }
   }
 }

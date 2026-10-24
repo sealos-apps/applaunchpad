@@ -4,6 +4,7 @@ cloud:
   port: 443
   httpPort: 80
   disableHttps: false
+  nodePortHost: '' # Public host/IP for NodePort; empty disables new NodePort access.
   desktopDomain: cloud.example.io
   userDomains:
     - name: cloud.example.io
@@ -44,6 +45,18 @@ launchpad:
     guide: false
     api: false
     gpu: false
+    networkStorage: false # Mount existing shared PVCs without taking ownership.
+
+  imagePorts:
+    enabled: false # Registry metadata inspection; enabled on demand by operators.
+    trustedRegistries: []
+  publicDomain:
+    customPrefixEnabled: false
+    reservedPrefixes: []
+  customDomain:
+    mode: cname # certificate requires an existing certificate integration.
+    certificate:
+      tlsSecretName: wildcard-cert
 
   checkIcpReg:
     enabled: false

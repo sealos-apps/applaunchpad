@@ -1,3 +1,6 @@
+import { convertDeploymentToStatefulSet } from '@/services/backend/workloadConversion';
+import yaml from 'js-yaml';
+import { updateStatefulSet } from '@/services/backend/statefulSetUpdate';
 import {
   GetAppByAppNameQuerySchema,
   DeleteAppByNameQuerySchema,
@@ -379,7 +382,10 @@ async function updateServiceAndIngress(
 
     if (hasIngressPorts) {
       const ingressYaml = json2Ingress(appEditData, Config().cloud.userDomains, {
-        disableHttps: Config().cloud.disableHttps
+        disableHttps: Config().cloud.disableHttps,
+        customDomainMode: Config().launchpad.customDomain?.mode,
+        customDomainCertificateSecretName:
+          Config().launchpad.customDomain?.certificate?.tlsSecretName
       });
       if (ingressYaml.trim()) {
         yamlList.push(ingressYaml);
@@ -420,35 +426,16 @@ async function convertToStatefulSet(
   const updatedAppData: AppEditType = {
     ...currentAppData,
     kind: 'statefulset',
-    storeList: createStorageList(storageData)
+    storeList: createStorageList(storageData).map((store) => ({
+      ...currentAppData.storeList.find((old) => old.path === store.path),
+      ...store,
+      name: currentAppData.storeList.find((old) => old.path === store.path)?.name || store.name
+    }))
   };
 
   const newStatefulSetYaml = json2DeployCr(updatedAppData, 'statefulset');
 
-  await deleteK8sResource(k8sApp, appName, namespace, 'Deployment');
-  await deleteServiceAndIngress(k8s, appName);
-  await new Promise((resolve) => setTimeout(resolve, DELAY_LONG));
-
-  const yamlList = [newStatefulSetYaml];
-  const hasServicePorts = updatedAppData.networks && updatedAppData.networks.length > 0;
-
-  if (hasServicePorts) {
-    const serviceYaml = json2Service(updatedAppData);
-    if (serviceYaml.trim()) yamlList.push(serviceYaml);
-
-    const hasIngressPorts = updatedAppData.networks.some(
-      (network) => network.openPublicDomain && !network.openNodePort
-    );
-
-    if (hasIngressPorts) {
-      const ingressYaml = json2Ingress(updatedAppData, Config().cloud.userDomains, {
-        disableHttps: Config().cloud.disableHttps
-      });
-      if (ingressYaml.trim()) yamlList.push(ingressYaml);
-    }
-  }
-
-  await applyYamlList(yamlList, 'create');
+  await convertDeploymentToStatefulSet(k8s, yaml.load(newStatefulSetYaml));
 }
 
 async function updateExistingPVCs(
@@ -579,54 +566,30 @@ async function updateStorage(
     return;
   }
 
-  if (currentAppData.kind === 'statefulset' && (!storageData || storageData.length === 0)) {
-    const updatedAppData: AppEditType = {
-      ...currentAppData,
-      storeList: []
-    };
-
-    const newStatefulSetYaml = json2DeployCr(updatedAppData, 'statefulset');
-
-    await deleteK8sResource(k8sApp, appName, k8s.namespace, 'StatefulSet');
-    await new Promise((resolve) => setTimeout(resolve, DELAY_SHORT));
-    await applyYamlList([newStatefulSetYaml], 'create');
-
-    try {
-      await k8sCore.deleteCollectionNamespacedPersistentVolumeClaim(
-        k8s.namespace,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        `app=${appName}`
-      );
-    } catch (error: any) {
-      // Ignore PVC deletion errors
-    }
-
-    return;
-  }
+  // Empty storage updates preserve existing mounts and underlying data.
+  if (!storageData?.length) return;
 
   if (currentAppData.kind === 'statefulset') {
     validateStorageData(storageData);
 
     const updatedAppData: AppEditType = {
       ...currentAppData,
-      storeList: createStorageList(storageData)
+      storeList: createStorageList(storageData).map((store) => ({
+        ...currentAppData.storeList.find((old) => old.path === store.path),
+        ...store,
+        name: currentAppData.storeList.find((old) => old.path === store.path)?.name || store.name
+      }))
     };
 
     const newStatefulSetYaml = json2DeployCr(updatedAppData, 'statefulset');
 
-    await deleteK8sResource(k8sApp, appName, k8s.namespace, 'StatefulSet');
-    await new Promise((resolve) => setTimeout(resolve, DELAY_SHORT));
-    await applyYamlList([newStatefulSetYaml], 'create');
+    await updateStatefulSet(k8sApp, k8s.namespace, yaml.load(newStatefulSetYaml) as any);
     await new Promise((resolve) => setTimeout(resolve, DELAY_SHORT));
 
     try {
       await updateExistingPVCs(k8sCore, k8s.namespace, appName, storageData);
     } catch (pvcError: any) {
-      console.error('PVC update error:', pvcError);
+      throw pvcError;
     }
   }
 }
@@ -671,12 +634,14 @@ function createNetworkConfig(appName: string, portConfig: any): any {
     protocol: isAppProtocol ? 'TCP' : protocol,
     appProtocol: isAppProtocol ? protocol : undefined,
     openPublicDomain:
-      isAppProtocol && (portConfig.isPublic !== undefined ? portConfig.isPublic : false),
-    publicDomain: isAppProtocol ? nanoid() : '',
+      isAppProtocol &&
+      portConfig.accessMode !== 'nodePort' &&
+      (portConfig.isPublic !== undefined ? portConfig.isPublic : false),
+    publicDomain: isAppProtocol ? portConfig.publicDomain || nanoid() : '',
     customDomain: '',
     domain: isAppProtocol ? Config().cloud.domain : '',
     nodePort: undefined,
-    openNodePort: !isAppProtocol
+    openNodePort: !isAppProtocol || portConfig.accessMode === 'nodePort'
   };
 }
 
@@ -743,6 +708,10 @@ function updateNetworkConfig(existingNetwork: any, portConfig: any, appName: str
     }
   }
 
+  if (portConfig.publicDomain !== undefined) updatedNetwork.publicDomain = portConfig.publicDomain;
+  if (portConfig.accessMode !== undefined)
+    updatedNetwork.openNodePort = portConfig.accessMode === 'nodePort';
+  if (updatedNetwork.openNodePort) updatedNetwork.openPublicDomain = false;
   return updatedNetwork;
 }
 

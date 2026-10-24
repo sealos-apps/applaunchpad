@@ -37,6 +37,7 @@ import {
 } from '@sealos/shadcn-ui/tooltip';
 import { Separator } from '@sealos/shadcn-ui/separator';
 
+const CertificateCustomAccessModal = dynamic(() => import('./CertificateCustomAccessModal'));
 const CustomAccessModal = dynamic(() => import('./CustomAccessModal'));
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz', 12);
@@ -243,14 +244,16 @@ export function NetworkSection({
         return network?.nodePort
           ? stripDisplayScheme(
               buildExternalUrl({
-                protocol: network.protocol,
-                host: normalizeDisplayHost(`${network.protocol.toLowerCase()}.${network.domain}`),
+                protocol: network.appProtocol || network.protocol,
+                host: normalizeDisplayHost(
+                  config.nodePortHost || `${network.protocol.toLowerCase()}.${network.domain}`
+                ),
                 nodePort: network.nodePort
               })
             )
-          : `${normalizeDisplayHost(`${network.protocol.toLowerCase()}.${network.domain}`)}:${t(
-              'pending_to_allocated'
-            )}`;
+          : `${normalizeDisplayHost(
+              config.nodePortHost || `${network.protocol.toLowerCase()}.${network.domain}`
+            )}:${t('pending_to_allocated')}`;
       }
       return stripDisplayScheme(
         buildExternalUrl({
@@ -492,6 +495,32 @@ export function NetworkSection({
                   <Plus className="w-4 h-4 mr-1" />
                   {t('Add Port')}
                 </Button>
+                {!!customAccessModalData && config.customDomain?.mode === 'certificate' && (
+                  <CertificateCustomAccessModal
+                    networkIndex={networks.findIndex(
+                      (item) => item.publicDomain === customAccessModalData.publicDomain
+                    )}
+                    currentCustomDomain={
+                      networks.find(
+                        (item) => item.publicDomain === customAccessModalData.publicDomain
+                      )?.customDomain || ''
+                    }
+                    onClose={() => setCustomAccessModalData(undefined)}
+                    onSuccess={(domain) => {
+                      const index = networks.findIndex(
+                        (item) => item.publicDomain === customAccessModalData.publicDomain
+                      );
+                      if (index >= 0) {
+                        dispatch({
+                          type: 'UPDATE_CUSTOM_DOMAIN',
+                          payload: { index, customDomain: domain }
+                        });
+                        onDomainVerified?.({ index, customDomain: domain });
+                      }
+                      setCustomAccessModalData(undefined);
+                    }}
+                  />
+                )}
               </>
             )}
 
@@ -522,7 +551,7 @@ export function NetworkSection({
         </CardContent>
       </Card>
 
-      {!!customAccessModalData && (
+      {!!customAccessModalData && config.customDomain?.mode !== 'certificate' && (
         <CustomAccessModal
           {...customAccessModalData}
           onClose={() => setCustomAccessModalData(undefined)}
@@ -536,6 +565,28 @@ export function NetworkSection({
               payload: { index: i, customDomain: e }
             });
             onDomainVerified?.({ index: i, customDomain: e });
+          }}
+        />
+      )}
+      {!!customAccessModalData && config.customDomain?.mode === 'certificate' && (
+        <CertificateCustomAccessModal
+          networkIndex={networks.findIndex(
+            (item) => item.publicDomain === customAccessModalData.publicDomain
+          )}
+          currentCustomDomain={
+            networks.find((item) => item.publicDomain === customAccessModalData.publicDomain)
+              ?.customDomain || ''
+          }
+          onClose={() => setCustomAccessModalData(undefined)}
+          onSuccess={(domain) => {
+            const index = networks.findIndex(
+              (item) => item.publicDomain === customAccessModalData.publicDomain
+            );
+            if (index >= 0) {
+              dispatch({ type: 'UPDATE_CUSTOM_DOMAIN', payload: { index, customDomain: domain } });
+              onDomainVerified?.({ index, customDomain: domain });
+            }
+            setCustomAccessModalData(undefined);
           }}
         />
       )}

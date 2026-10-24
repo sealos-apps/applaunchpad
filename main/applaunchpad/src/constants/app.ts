@@ -105,3 +105,6 @@ export const AppSourceConfigs: Array<{
   { key: templateDeployKey, type: 'app_store' },
   { key: sealafDeployKey, type: 'sealaf' }
 ];
+
+export const publicDomainPortKey = 'cloud.sealos.io/app-deploy-manager-port';
+export const shareStorageKey = 'cloud.sealos.io/share-storage';

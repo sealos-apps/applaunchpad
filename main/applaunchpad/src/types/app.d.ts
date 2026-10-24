@@ -11,12 +11,27 @@ import type {
   SinglePodMetrics,
   V1StatefulSet,
   V1Volume,
-  V1VolumeMount
+  V1VolumeMount,
+  V1Toleration
 } from '@kubernetes/client-node';
 import type { Quantity } from '@sealos/shared';
 import { MonitorDataResult } from './monitor';
 
 export type HpaTarget = 'cpu' | 'memory' | 'gpu';
+
+export type StorageType = 'local' | 'remote';
+export type NetworkRoutePathType = 'Prefix' | 'Exact' | 'ImplementationSpecific';
+export interface AppNetworkRouteType {
+  path: string;
+  pathType: NetworkRoutePathType;
+  serviceName?: string;
+  servicePort?: number;
+  servicePortName?: string;
+}
+export interface SharedMemoryType {
+  enabled: boolean;
+  sizeLimit: Quantity;
+}
 
 export type DeployKindsType =
   | V1Deployment
@@ -33,6 +48,7 @@ export type GpuType = {
   manufacturers: string;
   type: string;
   amount: number;
+  resource?: { card: string };
 };
 
 export interface AppStatusMapType {
@@ -69,6 +85,8 @@ export type ApplicationProtocolType = 'HTTP' | 'GRPC' | 'WS';
 export type TransportProtocolType = 'TCP' | 'UDP' | 'SCTP';
 
 export interface AppEditType {
+  originalResources?: Record<string, any>[];
+  originalWorkload?: Record<string, any>;
   appName: string;
   imageName: string;
   runCMD: string;
@@ -90,6 +108,11 @@ export interface AppEditType {
     domain: string; // Main promoted domain
     nodePort?: number; // nodePort
     openNodePort: boolean; // open nodePort
+    routes?: AppNetworkRouteType[];
+  }[];
+  serviceList?: {
+    name: string;
+    ports: { name?: string; port: number; protocol?: TransportProtocolType }[];
   }[];
   envs: {
     key: string;
@@ -120,7 +143,18 @@ export interface AppEditType {
     name: string;
     path: string;
     value: Quantity;
+    storageType?: StorageType;
+    storageClassName?: string;
   }[];
+  // References existing PVCs; mounting does not transfer lifecycle ownership.
+  networkStoreList?: {
+    name: string;
+    path: string;
+    storageClassName?: string;
+  }[];
+  ephemeralStorage?: Quantity;
+  sharedMemory?: SharedMemoryType;
+  tolerations?: V1Toleration[];
   labels: { [key: string]: string };
   volumes: V1Volume[];
   volumeMounts: V1VolumeMount[];
@@ -139,7 +173,19 @@ export type AppEditSyncedFields = Pick<
   | 'appName'
   | 'labels'
   | 'gpu'
->;
+> &
+  Partial<
+    Pick<
+      AppEditType,
+      | 'envs'
+      | 'configMapList'
+      | 'storeList'
+      | 'networkStoreList'
+      | 'ephemeralStorage'
+      | 'sharedMemory'
+      | 'tolerations'
+    >
+  >;
 
 export type TAppSourceType = 'app_store' | 'sealaf';
 
@@ -219,7 +265,12 @@ export interface PodEvent {
 
 export type AppPatchPropsType = (
   | { type: 'delete'; kind: `${YamlKindEnum}`; name: string }
-  | { type: 'patch'; kind: `${YamlKindEnum}`; value: Record<string, any> }
+  | {
+      type: 'patch';
+      restartRequired?: boolean;
+      kind: `${YamlKindEnum}`;
+      value: Record<string, any>;
+    }
   | { type: 'create'; kind: `${YamlKindEnum}`; value: string }
 )[];
 
@@ -242,4 +293,9 @@ export type GpuNodeType = {
   'gpu.alias': string;
   'gpu.available': number;
   'gpu.used': number;
+  'gpu.ref'?: string;
+  icon?: string;
+  name?: { zh: string; en: string };
+  resource?: { card: string };
+  nodeName?: string;
 };

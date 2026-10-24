@@ -304,7 +304,10 @@ export const adaptAppDetail = async (
     .filter((item) => item.kind === YamlKindEnum.Service)
     .map((item) => item as V1Service);
 
-  const allServicePorts = allServices.flatMap((service) => service.spec?.ports || []);
+  const assignedIngresses = new Set<string>();
+  const allServicePorts = allServices.flatMap((service) =>
+    (service.spec?.ports || []).map((port) => ({ ...port, serviceName: service.metadata?.name }))
+  );
 
   const deployKindsMap: {
     [YamlKindEnum.StatefulSet]?: V1StatefulSet;
@@ -403,11 +406,38 @@ export const adaptAppDetail = async (
     return results.filter((item) => item.value);
   };
 
-  const useGpu = !!Number(
-    appDeploy.spec?.template?.spec?.containers?.[0]?.resources?.limits?.[gpuResourceKey]
-  );
-  const gpuNodeSelector = useGpu ? appDeploy?.spec?.template?.spec?.nodeSelector : null;
+  const limits = appDeploy.spec?.template?.spec?.containers?.[0]?.resources?.limits || {};
+  const selectors = appDeploy.spec?.template?.spec?.nodeSelector || {};
+  const selectorKey =
+    Object.keys(selectors).find((key) => key.endsWith('/gpu.product')) || gpuNodeSelectorKey;
+  const manufacturer = selectorKey.split('.')[0];
+  const resourceKey =
+    Object.keys(limits).find(
+      (key) => key.startsWith(`${manufacturer}.com/`) && Number(limits[key]) > 0
+    ) || gpuResourceKey;
+  const useGpu = !!Number(limits[resourceKey]);
+  const gpuNodeSelector = useGpu ? selectors : null;
 
+  const podSpec = appDeploy.spec?.template?.spec;
+  const container = podSpec?.containers?.[0];
+  const referencedVolumes = (podSpec?.volumes || []).filter((v) => v.persistentVolumeClaim);
+  const networkStoreList = referencedVolumes.flatMap((volume) =>
+    (container?.volumeMounts || [])
+      .filter((mount) => mount.name === volume.name)
+      .map((mount) => ({
+        name: volume.persistentVolumeClaim!.claimName,
+        path: mount.mountPath
+      }))
+  );
+  const sharedVolume = (podSpec?.volumes || []).find(
+    (v) =>
+      v.emptyDir?.medium === 'Memory' &&
+      container?.volumeMounts?.some((m) => m.name === v.name && m.mountPath === '/dev/shm')
+  );
+  const managedExtraVolumes = new Set([
+    ...referencedVolumes.map((v) => v.name),
+    ...(sharedVolume ? [sharedVolume.name] : [])
+  ]);
   const getFilteredVolumeMounts = () => {
     const volumeMounts = appDeploy?.spec?.template?.spec?.containers?.[0]?.volumeMounts || [];
     const storeNames =
@@ -416,13 +446,17 @@ export const adaptAppDetail = async (
       ) || [];
 
     return volumeMounts.filter(
-      (mount) => !configMapVolumeNames.includes(mount.name) && !storeNames.includes(mount.name)
+      (mount) =>
+        !configMapVolumeNames.includes(mount.name) &&
+        !storeNames.includes(mount.name) &&
+        !managedExtraVolumes.has(mount.name)
     );
   };
 
   const getFilteredVolumes = () => {
     return (
       appDeploy?.spec?.template?.spec?.volumes?.filter((volume) => {
+        if (managedExtraVolumes.has(volume.name)) return false;
         if (!deployKindsMap.ConfigMap) return true;
         const configMapName = deployKindsMap.ConfigMap.metadata?.name;
         return !(volume.configMap?.name === configMapName);
@@ -433,15 +467,32 @@ export const adaptAppDetail = async (
   return {
     labels: appDeploy?.metadata?.labels || {},
     crYamlList: configs,
+    originalWorkload: appDeploy,
+    originalResources: configs,
+    networkStoreList,
+    ephemeralStorage: container?.resources?.limits?.['ephemeral-storage']
+      ? parseK8sQuantityOrZero(container.resources.limits['ephemeral-storage'])
+      : undefined,
+    sharedMemory: sharedVolume
+      ? { enabled: true, sizeLimit: parseK8sQuantityOrZero(sharedVolume.emptyDir?.sizeLimit) }
+      : undefined,
+    tolerations: podSpec?.tolerations,
+    serviceList: allServices.map((svc) => ({
+      name: svc.metadata?.name || '',
+      ports: (svc.spec?.ports || []).map((port) => ({
+        name: port.name,
+        port: port.port,
+        protocol: port.protocol as TransportProtocolType
+      }))
+    })),
     id: appDeploy.metadata?.uid || ``,
     appName: appName,
     createTime: dayjs(appDeploy.metadata?.creationTimestamp).format('YYYY-MM-DD HH:mm'),
     status: calculateAppStatus(appDeploy),
     isPause: !!appDeploy?.metadata?.annotations?.[pauseKey],
-    imageName:
-      appDeploy?.metadata?.annotations?.originImageName ||
-      appDeploy.spec?.template?.spec?.containers?.[0]?.image ||
-      '',
+    imageName: atobSecretYaml(deployKindsMap?.Secret?.data?.['.dockerconfigjson']).use
+      ? container?.image || appDeploy.metadata?.annotations?.originImageName || ''
+      : appDeploy.metadata?.annotations?.originImageName || container?.image || '',
     runCMD: appDeploy.spec?.template?.spec?.containers?.[0]?.command?.join(' ') || '',
     cmdParam:
       (appDeploy.spec?.template?.spec?.containers?.[0]?.args?.length === 1
@@ -455,11 +506,10 @@ export const adaptAppDetail = async (
       appDeploy.spec?.template?.spec?.containers?.[0]?.resources?.limits?.memory || '0'
     ),
     gpu: {
-      type: gpuNodeSelector?.[gpuNodeSelectorKey] || '',
-      amount: Number(
-        appDeploy.spec?.template?.spec?.containers?.[0]?.resources?.limits?.[gpuResourceKey] || 1
-      ),
-      manufacturers: 'nvidia'
+      type: gpuNodeSelector?.[selectorKey] || '',
+      amount: Number(limits[resourceKey] || 1),
+      manufacturers: manufacturer,
+      resource: { card: resourceKey }
     },
     usedCpu: {
       name: '',
@@ -481,34 +531,48 @@ export const adaptAppDetail = async (
       }) || [],
     networks:
       allServicePorts?.map((item) => {
-        const service = allServices.find((svc) =>
-          svc.spec?.ports?.some(
-            (port) => port.port === item.port && port.protocol === item.protocol
-          )
-        );
+        const service = allServices.find((svc) => svc.metadata?.name === item.serviceName);
 
         const ingress = configs.find(
           (config: any) =>
             item.protocol === 'TCP' &&
             config.kind === YamlKindEnum.Ingress &&
-            config?.spec?.rules?.[0]?.http?.paths?.[0]?.backend?.service?.port?.number === item.port
+            !assignedIngresses.has(config.metadata?.name) &&
+            config?.spec?.rules?.some((rule: any) =>
+              rule.http?.paths?.some(
+                (path: any) =>
+                  path.backend?.service?.name === service?.metadata?.name &&
+                  (path.backend?.service?.port?.number === item.port ||
+                    (item.name && path.backend?.service?.port?.name === item.name))
+              )
+            )
         ) as V1Ingress;
 
+        if (ingress?.metadata?.name) assignedIngresses.add(ingress.metadata.name);
         const domain = ingress?.spec?.rules?.[0].host || '';
 
         const protocol = (item?.protocol || 'TCP') as TransportProtocolType;
 
         // Should fallback appProtocol to HTTP for ingresses when using TCP services
         const appProtocol =
+          (item.appProtocol?.toUpperCase() as ApplicationProtocolType) ||
           (ingress?.metadata?.annotations?.[
             'nginx.ingress.kubernetes.io/backend-protocol'
-          ] as ApplicationProtocolType) ?? (protocol === 'TCP' ? 'HTTP' : undefined);
+          ] as ApplicationProtocolType) ||
+          (protocol === 'TCP' && !item.nodePort ? 'HTTP' : undefined);
 
         const isCustomDomain =
           !domain.endsWith(cloudOptions.domain) &&
           !cloudOptions.userDomains.some((item) => domain.endsWith(item.name));
 
         const result = {
+          routes: ingress?.spec?.rules?.[0]?.http?.paths?.map((path) => ({
+            path: path.path || '/',
+            pathType: path.pathType as any,
+            serviceName: path.backend.service?.name,
+            servicePort: path.backend.service?.port?.number,
+            servicePortName: path.backend.service?.port?.name
+          })),
           serviceName: service?.metadata?.name || '',
           networkName: ingress?.metadata?.name || '',
           portName: item.name || '',
@@ -525,7 +589,7 @@ export const adaptAppDetail = async (
           domain: isCustomDomain
             ? cloudOptions.domain
             : item?.nodePort
-            ? domain
+            ? cloudOptions.domain
             : domain.split('.').slice(1).join('.') || cloudOptions.domain
         };
         return result;
@@ -559,7 +623,12 @@ export const adaptAppDetail = async (
           const storage = item.spec?.resources?.requests?.storage;
           return {
             name: item.metadata?.name || '',
-            path: item.metadata?.annotations?.path || '',
+            path:
+              item.metadata?.annotations?.path ||
+              container?.volumeMounts?.find((m) => m.name === item.metadata?.name)?.mountPath ||
+              '',
+            storageClassName: item.spec?.storageClassName,
+            storageType: 'local',
             value: storage
               ? parseK8sQuantityOrZero(storage)
               : storageAnnotationToQuantity(item.metadata?.annotations?.value)
@@ -601,7 +670,14 @@ export const adaptEditAppData = (app: AppDetailType): AppEditType => {
     'labels',
     'kind',
     'volumes',
-    'volumeMounts'
+    'volumeMounts',
+    'originalWorkload',
+    'originalResources',
+    'networkStoreList',
+    'ephemeralStorage',
+    'sharedMemory',
+    'tolerations',
+    'serviceList'
   ];
 
   const res: Record<string, any> = {};

@@ -1,18 +1,94 @@
+import { Config } from '@/config';
+import { buildExternalUrl } from '@/utils/network-url';
 import { appDeployKey } from '@/constants/app';
 import { authSession } from '@/services/backend/auth';
 import { getK8s } from '@/services/backend/kubernetes';
 import { jsonRes } from '@/services/backend/response';
 import { ApplicationProtocolType } from '@/types/app';
-import { buildExternalUrl } from '@/utils/network-url';
+import { getPublicAddressReadyResult } from '@/utils/publicAccess';
+import {
+  getIngressServiceBackends,
+  getReadyCheckTarget,
+  hasReadyEndpointForBackend,
+  ReadyCheckBackend,
+  ReadyCheckTarget
+} from '@/utils/ready-check';
+import http from 'http';
+import https from 'https';
 import { NextApiRequest, NextApiResponse } from 'next';
-import { Config } from '@/config';
+
+const requestReadyCheckTarget = (target: ReadyCheckTarget) => {
+  if (!target.hostHeader) {
+    return fetch(target.fetchUrl);
+  }
+
+  return new Promise<{
+    status: number;
+    headers: { get: (name: string) => string | null };
+    text: () => Promise<string>;
+  }>((resolve, reject) => {
+    const url = new URL(target.fetchUrl);
+    const requestClient = url.protocol === 'https:' ? https : http;
+    const req = requestClient.request(
+      url,
+      {
+        headers: {
+          Host: target.hostHeader
+        },
+        servername: target.servername
+      },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          body += chunk;
+        });
+        response.on('end', () => {
+          resolve({
+            status: response.statusCode || 0,
+            headers: {
+              get: (name: string) => {
+                const value = response.headers[name.toLowerCase()];
+                return Array.isArray(value) ? value.join(', ') : value || null;
+              }
+            },
+            text: async () => body
+          });
+        });
+      }
+    );
+
+    req.setTimeout(30000, () => {
+      req.destroy(new Error('ready check request timeout'));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+};
+
+const hasReadyServiceBackend = async ({
+  k8sCore,
+  namespace,
+  backend
+}: {
+  k8sCore: Awaited<ReturnType<typeof getK8s>>['k8sCore'];
+  namespace: string;
+  backend: ReadyCheckBackend;
+}) => {
+  try {
+    const endpoints = await k8sCore.readNamespacedEndpoints(backend.serviceName, namespace);
+    return hasReadyEndpointForBackend(endpoints.body.subsets, backend);
+  } catch (error) {
+    return false;
+  }
+};
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     const { appName } = req.query as { appName: string };
     const config = Config();
     const accessConfig = {
-      disableHttps: config.cloud.disableHttps,
+      disableHttps: !!config.cloud.disableHttps,
       cloudPort: config.cloud.port,
       httpPort: config.cloud.httpPort
     };
@@ -20,7 +96,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       throw new Error('appName is empty');
     }
 
-    const { k8sNetworkingApp, namespace } = await getK8s({
+    const { k8sCore, k8sNetworkingApp, namespace } = await getK8s({
       kubeconfig: await authSession(req.headers)
     });
 
@@ -51,39 +127,44 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const backendProtocol = item?.metadata?.annotations?.[
           'nginx.ingress.kubernetes.io/backend-protocol'
         ] as ApplicationProtocolType;
+        const certificateMode = config.launchpad?.customDomain?.mode === 'certificate';
+        const target = certificateMode
+          ? getReadyCheckTarget({
+              host,
+              backendProtocol,
+              config: accessConfig
+            })
+          : {
+              fetchUrl: buildExternalUrl({ protocol: 'HTTP', host, config: accessConfig }),
+              url: buildExternalUrl({ protocol: backendProtocol, host, config: accessConfig })
+            };
+        if (certificateMode) {
+          const serviceBackends = getIngressServiceBackends(item);
+          if (!serviceBackends.length) {
+            return { ready: false, url: target.url, error: 'Invalid ingress backend' };
+          }
 
-        const fetchUrl = buildExternalUrl({
-          protocol: 'HTTP',
-          host,
-          config: accessConfig
-        });
-        const url = buildExternalUrl({
-          protocol: backendProtocol,
-          host,
-          config: accessConfig
-        });
+          const hasReadyBackend = (
+            await Promise.all(
+              serviceBackends.map((backend) =>
+                hasReadyServiceBackend({
+                  k8sCore,
+                  namespace,
+                  backend
+                })
+              )
+            )
+          ).every(Boolean);
 
+          if (!hasReadyBackend) {
+            return { ready: false, url: target.url, error: 'No ready endpoints' };
+          }
+        }
         try {
-          const response = await fetch(fetchUrl);
-
-          if (response.status === 404 && response.headers.get('content-length') === '0') {
-            return { ready: false, url, error: '404' };
-          }
-
-          const text = await response.text();
-
-          if (
-            response.status === 503 &&
-            (text.includes('upstream connect error') ||
-              text.includes('upstream not health') ||
-              text.includes('no healthy upstream'))
-          ) {
-            return { ready: false, url, error: 'Upstream not healthy' };
-          }
-
-          return { ready: true, url };
+          const response = await requestReadyCheckTarget(target);
+          return getPublicAddressReadyResult(response as Response, target.url);
         } catch (error) {
-          return { ready: false, url, error: 'fetch error' };
+          return { ready: false, url: target.url, error: 'fetch error' };
         }
       })
     );

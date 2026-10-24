@@ -56,13 +56,15 @@ export const formData2Yamls = (
   userDomains: { name: string; secretName: string }[],
   options: {
     disableHttps?: boolean;
+    customDomainMode?: 'cname' | 'certificate';
+    customDomainCertificateSecretName?: string;
   } = {}
 ) => [
   {
     filename: 'service.yaml',
     value: json2Service(data)
   },
-  data.kind === 'statefulset' || data.storeList?.length > 0
+  data.kind === 'statefulset' || data.storeList?.some((store) => store.storageType !== 'remote')
     ? {
         filename: 'statefulset.yaml',
         value: json2DeployCr(data, 'statefulset')
@@ -270,14 +272,18 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
           data.networks[index].customDomain = customDomain;
         }
         const ingressYaml = json2Ingress(data, config.userDomains, {
-          disableHttps: config.disableHttps
+          disableHttps: config.disableHttps,
+          customDomainMode: config.customDomain?.mode,
+          customDomainCertificateSecretName: config.customDomain?.certificate?.tlsSecretName
         });
         setIsLoading(true);
         postDeployApp([ingressYaml], 'replace')
           .then(() => {
             toast.success(t('Deployment Successful'));
             formOldYamls.current = formData2Yamls(data, config.userDomains, {
-              disableHttps: config.disableHttps
+              disableHttps: config.disableHttps,
+              customDomainMode: config.customDomain?.mode,
+              customDomainCertificateSecretName: config.customDomain?.certificate?.tlsSecretName
             });
           })
           .catch((err) => {
@@ -321,7 +327,9 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
         console.log(res, 'init res');
         oldAppEditData.current = res;
         formOldYamls.current = formData2Yamls(res, config.userDomains, {
-          disableHttps: config.disableHttps
+          disableHttps: config.disableHttps,
+          customDomainMode: config.customDomain?.mode,
+          customDomainCertificateSecretName: config.customDomain?.certificate?.tlsSecretName
         });
         crOldYamls.current = res.crYamlList;
 
@@ -331,7 +339,9 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
         setAlready(true);
         setYamlList(
           formData2Yamls(realTimeForm.current, config.userDomains, {
-            disableHttps: config.disableHttps
+            disableHttps: config.disableHttps,
+            customDomainMode: config.customDomain?.mode,
+            customDomainCertificateSecretName: config.customDomain?.certificate?.tlsSecretName
           })
         );
       },
@@ -349,7 +359,9 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
       try {
         setYamlList(
           formData2Yamls(realTimeForm.current, config.userDomains, {
-            disableHttps: config.disableHttps
+            disableHttps: config.disableHttps,
+            customDomainMode: config.customDomain?.mode,
+            customDomainCertificateSecretName: config.customDomain?.certificate?.tlsSecretName
           })
         );
       } catch (error) {}
@@ -369,7 +381,23 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
 
       const basicFields: (keyof AppEditSyncedFields)[] = router.query?.name
         ? ['imageName', 'cpu', 'memory']
-        : ['imageName', 'replicas', 'cpu', 'memory', 'cmdParam', 'runCMD', 'appName', 'labels'];
+        : [
+            'imageName',
+            'replicas',
+            'cpu',
+            'memory',
+            'cmdParam',
+            'runCMD',
+            'appName',
+            'labels',
+            'envs',
+            'configMapList',
+            'storeList',
+            'networkStoreList',
+            'ephemeralStorage',
+            'sharedMemory',
+            'tolerations'
+          ];
 
       basicFields.forEach((field) => {
         if (parsedData[field] !== undefined) {
@@ -523,7 +551,9 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
         realTimeForm.current = submitData;
 
         const parseYamls = formData2Yamls(submitData, config.userDomains, {
-          disableHttps: config.disableHttps
+          disableHttps: config.disableHttps,
+          customDomainMode: config.customDomain?.mode,
+          customDomainCertificateSecretName: config.customDomain?.certificate?.tlsSecretName
         });
         setYamlList(parseYamls);
 

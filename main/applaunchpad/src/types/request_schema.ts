@@ -1,3 +1,4 @@
+import { validatePortRequest } from '@/utils/validatePortRequest';
 /**
  * API Request and Response Schemas (request_schema.ts)
  *
@@ -47,10 +48,21 @@ import {
   quantityToPublicCpuCores,
   quantityToPublicMemoryGi
 } from '@/utils/resourceQuantity';
-import {
-  APP_NAME_BASE_MAX_LENGTH,
-  APP_GENERATED_NAME_PATTERN
-} from '@/utils/appNameValidation';
+import { APP_NAME_BASE_MAX_LENGTH, APP_GENERATED_NAME_PATTERN } from '@/utils/appNameValidation';
+
+const EnvArraySchema = z.array(StandardEnvSchema).superRefine((envs, ctx) => {
+  const seen = new Set<string>();
+  envs.forEach((env, index) => {
+    const name = env.name.trim();
+    if (seen.has(name))
+      ctx.addIssue({
+        code: 'custom',
+        path: [index, 'name'],
+        message: `Duplicate environment variable name: ${name}`
+      });
+    seen.add(name);
+  });
+});
 
 export const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz', 12);
 
@@ -94,6 +106,8 @@ export const SimpleStorageSchema = z
 
 export const PortUpdateSchema = z
   .object({
+    accessMode: z.enum(['domain', 'nodePort']).optional(),
+    publicDomain: z.string().optional(),
     number: z.number().min(1).max(65535).optional().openapi({
       description: 'Port number (1-65535) - required for new ports, optional for updates'
     }),
@@ -115,6 +129,7 @@ export const PortUpdateSchema = z
       description: 'Service name (read-only, for reference)'
     })
   })
+  .superRefine(validatePortRequest)
   .openapi({
     description:
       'Port configuration. Include portName to update existing port. Omit portName to create new port. Ports not included in the array will be deleted.'
@@ -240,7 +255,7 @@ export const UpdateAppResourcesSchema = z
         'Container image configuration. Set imageRegistry to null to switch to public image.'
     }),
 
-    env: z.array(StandardEnvSchema).optional().openapi({
+    env: EnvArraySchema.optional().openapi({
       description: 'Environment variables'
     }),
 
@@ -254,7 +269,7 @@ export const UpdateAppResourcesSchema = z
 
     storage: z.array(SimpleStorageSchema).optional().openapi({
       description:
-        'Storage configurations (COMPLETE REPLACEMENT). Pass all storage entries to keep. Empty array removes all storage. Omit field to keep existing storage unchanged. Name is auto-generated from path.'
+        'Storage configurations (COMPLETE REPLACEMENT). Pass all storage entries to keep. Empty or omitted storage preserves existing mounts and PVCs. Removing entries never deletes underlying PVCs. Name is auto-generated from path.'
     }),
 
     ports: z.array(PortUpdateSchema).optional().openapi({
@@ -279,7 +294,7 @@ export const UpdateAppResourcesSchema = z
   .openapi({
     title: 'Update Application Configuration',
     description:
-      'Schema for updating application configuration. IMPORTANT: configMap, storage, and ports are COMPLETE REPLACEMENTS when provided - pass all items you want to keep. Use empty array [] to remove all items.'
+      'Schema for updating application configuration. IMPORTANT: configMap, storage, and ports are COMPLETE REPLACEMENTS when provided - pass all items you want to keep. Use empty array [] to remove configMap or ports; empty storage is a no-op.'
   });
 
 export const GetAppPodsByAppNameQuerySchema = z.object({
@@ -341,8 +356,12 @@ export const CreateLaunchpadRequestSchema = z
         PortConfigSchema.pick({
           number: true,
           protocol: true,
-          exposesPublicDomain: true
+          exposesPublicDomain: true,
+          accessMode: true,
+          publicDomain: true
         })
+          .partial({ publicDomain: true })
+          .superRefine(validatePortRequest)
       )
       .default([
         {
@@ -355,7 +374,7 @@ export const CreateLaunchpadRequestSchema = z
         description: 'Port/Network configurations for the application'
       }),
 
-    env: z.array(StandardEnvSchema).default([]).openapi({
+    env: EnvArraySchema.default([]).openapi({
       description: 'Environment variables - was: envs'
     }),
 
@@ -392,11 +411,11 @@ export function transformToLegacySchema(
       protocol: (isApplicationProtocol ? 'TCP' : port.protocol) as TransportProtocolType,
       appProtocol: (isApplicationProtocol ? port.protocol : 'HTTP') as ApplicationProtocolType,
       openPublicDomain: isApplicationProtocol ? port.exposesPublicDomain : false,
-      publicDomain: isApplicationProtocol ? nanoid() : '',
+      publicDomain: isApplicationProtocol ? port.publicDomain || nanoid() : '',
       customDomain: '',
       domain: '',
       nodePort: undefined,
-      openNodePort: !isApplicationProtocol
+      openNodePort: !isApplicationProtocol || port.accessMode === 'nodePort'
     };
   }) || [
     {
@@ -554,6 +573,7 @@ export function transformFromLegacySchema(
         return {
           serviceName: network.serviceName,
           number: network.port,
+          accessMode: network.openNodePort ? 'nodePort' : 'domain',
           protocol: protocol,
           exposesPublicDomain: exposesPublicDomain,
           networkName: network.networkName,

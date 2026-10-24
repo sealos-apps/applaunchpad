@@ -1,3 +1,4 @@
+import { getLogFieldLabel } from '@/utils/logFieldLabel';
 import { BaseTable } from '@/components/BaseTable/index';
 import {
   ColumnDef,
@@ -68,7 +69,7 @@ export const LogTable = ({
 
     return Array.from(uniqueKeys).map((key) => ({
       value: key,
-      label: key,
+      label: getLogFieldLabel(key),
       checked: key in prevFieldStates ? prevFieldStates[key] : true,
       accessorKey: key
     }));

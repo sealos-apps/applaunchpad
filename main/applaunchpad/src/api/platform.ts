@@ -45,3 +45,10 @@ export const checkDomainICP = (data: CheckICPRegParams) =>
     domain: string;
     icpRegistered: boolean;
   }>('/api/platform/checkIcpReg', data);
+
+export type { CustomDomainCertificateCoverageResult } from '@/services/backend/customDomainCertificate';
+export const checkCustomDomainCertificateCoverage = (data: { customDomain: string }) =>
+  POST<import('@/services/backend/customDomainCertificate').CustomDomainCertificateCoverageResult>(
+    '/api/platform/checkCustomDomainCertificate',
+    data
+  );

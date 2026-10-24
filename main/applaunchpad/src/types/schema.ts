@@ -150,17 +150,12 @@ export const StandardEnvSchema = z
     value: z.string().optional().openapi({
       description: 'Environment variable value'
     }),
-    valueFrom: z
-      .object({
-        secretKeyRef: z.object({
-          key: z.string(),
-          name: z.string()
-        })
-      })
-      .optional()
-      .openapi({
-        description: 'Reference to secret for the value'
-      })
+    valueFrom: z.object({
+      secretKeyRef: z.object({ name: z.string(), key: z.string(), optional: z.boolean().optional() }).optional(),
+      configMapKeyRef: z.object({ name: z.string(), key: z.string(), optional: z.boolean().optional() }).optional(),
+      fieldRef: z.object({ apiVersion: z.string().optional(), fieldPath: z.string() }).optional(),
+      resourceFieldRef: z.object({ containerName: z.string().optional(), resource: z.string(), divisor: z.string().optional() }).optional()
+    }).optional().openapi({ description: 'Kubernetes environment value source' })
   })
   .openapi({
     description: 'Environment variable configuration'
@@ -243,6 +238,8 @@ export const StandardConfigMapSchema = z
   });
 
 export const PortConfigSchema = z.object({
+  accessMode: z.enum(['domain', 'nodePort']).optional(),
+
   serviceName: z.string().optional().openapi({
     description: 'Kubernetes service name'
   }),
@@ -264,6 +261,14 @@ export const PortConfigSchema = z.object({
   nodePort: z.number().optional()
 });
 
+// Responses describe existing Kubernetes workloads, including values outside create-form presets.
+const ResourceResponseSchema = z.object({
+  ...ResourceSchema.shape,
+  cpu: z.number().nonnegative(),
+  memory: z.number().nonnegative(),
+  replicas: z.number().int().nonnegative().optional()
+});
+
 export const LaunchpadApplicationSchema = z
   .object({
     name: z.string().openapi({ description: 'Application name' }),
@@ -271,7 +276,7 @@ export const LaunchpadApplicationSchema = z
     launchCommand: LaunchCommandSchema.optional().openapi({
       description: 'Container launch command configuration'
     }),
-    resource: ResourceSchema,
+    resource: ResourceResponseSchema,
     ports: z.array(PortConfigSchema).optional(),
     env: z.array(StandardEnvSchema).optional(),
     storage: z.array(StorageSchema).optional(),

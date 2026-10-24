@@ -68,6 +68,8 @@ function countGpuSource(rawData: ResourcePriceType['data']['properties'], gpuNod
     if (!gpuNode) return;
     gpuList.push({
       alias: gpuNode['gpu.alias'],
+      resource: gpuNode.resource,
+      manufacturers: gpuNode['gpu.ref']?.split('.')[0] || 'nvidia',
       type: gpuNode['gpu.product'],
       price: (item.unit_price * valuationMap.gpu) / PRICE_SCALE,
       inventory: +gpuNode['gpu.available'],

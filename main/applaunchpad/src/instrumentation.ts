@@ -1,17 +1,22 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { readFileSync } = await import('fs');
+    const { readFileSync, existsSync } = await import('fs');
+    const { load } = await import('js-yaml');
+    const { migrateAppConfig, resolveAppConfigPath } = await import(
+      './services/backend/configMigration'
+    );
     const { readConfig, mountToGlobalThis, prettyPrintErrors } = await import(
       '@sealos/shared/server/config'
     );
     const { AppConfigSchema } = await import('./types/config');
 
-    const configPath =
-      process.env.NODE_ENV === 'development' ? 'data/config.local.yaml' : '/app/data/config.yaml';
+    const configPath = resolveAppConfigPath(process.env.NODE_ENV === 'development', existsSync);
 
     try {
       const configText = readFileSync(configPath, 'utf-8');
-      const result = await readConfig(configText, AppConfigSchema as any);
+      const result = await readConfig(configText, AppConfigSchema as any, (text) =>
+        migrateAppConfig(load(text), (message) => console.warn(`[App Config] ${message}`))
+      );
 
       if (result.error) {
         console.error('[Instrumentation Hook] Configuration validation failed:');
@@ -20,6 +25,10 @@ export async function register() {
       }
 
       mountToGlobalThis('__APP_CONFIG__', result.data);
+      const { setPublicDomainReservedPrefixes } = await import('./utils/public-domain');
+      setPublicDomainReservedPrefixes(
+        globalThis.__APP_CONFIG__?.launchpad.publicDomain?.reservedPrefixes
+      );
       console.log('[Instrumentation Hook] Configuration loaded.');
 
       // GPU node detection

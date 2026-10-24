@@ -109,3 +109,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "applaunchpad-frontend.url" -}}
 {{- include "applaunchpad-frontend.scheme" . -}}://{{ include "applaunchpad-frontend.host" . }}{{ include "applaunchpad-frontend.portSuffix" . }}
 {{- end }}
+
+{{- define "applaunchpad-frontend.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "applaunchpad-frontend.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}

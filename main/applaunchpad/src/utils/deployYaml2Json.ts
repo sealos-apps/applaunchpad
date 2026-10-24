@@ -5,11 +5,12 @@ import {
   gpuResourceKey,
   maxReplicasKey,
   minReplicasKey,
-  publicDomainKey
+  publicDomainKey,
+  publicDomainPortKey
 } from '@/constants/app';
 import type { AppEditType } from '@/types/app';
-import { str2Num, strToBase64 } from '@/utils/tools';
-import dayjs from 'dayjs';
+import { ensureUniquePortNames, str2Num, strToBase64 } from '@/utils/tools';
+import { preserveWorkloadFields } from '@/utils/workloadPreservation';
 import yaml from 'js-yaml';
 import { customAlphabet, customRandom } from 'nanoid';
 import crypto from 'crypto';
@@ -49,7 +50,14 @@ const getServiceName = (data: AppEditType, forNodePort: boolean = false): string
   const deterministicId = createDeterministicNanoid(seed);
   const suffix = forNodePort ? '-nodeport' : '';
 
-  return `${data.appName}${suffix}-${deterministicId}`;
+  const normalized = data.appName
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const base = (/^[a-z]/.test(normalized) ? normalized : `app-${normalized || 'service'}`)
+    .slice(0, 63 - suffix.length - deterministicId.length - 1)
+    .replace(/-+$/g, '');
+  return `${base}${suffix}-${deterministicId}`;
 };
 
 export const yamlString2Objects = (yamlString: string): object[] => {
@@ -60,15 +68,19 @@ export const yamlString2Objects = (yamlString: string): object[] => {
 };
 
 export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefulset') => {
-  const totalStorage = data.storeList.reduce(
-    (acc, item) => acc + quantityToStorageGi(item.value),
-    0
-  );
+  const localStores = data.storeList.filter((store) => store.storageType !== 'remote');
+  const remoteStores = data.storeList.filter((store) => store.storageType === 'remote');
+  const gpuResource = data.gpu?.resource?.card || gpuResourceKey;
+  const totalStorage = localStores.reduce((acc, item) => acc + quantityToStorageGi(item.value), 0);
 
   const metadata = {
     name: data.appName,
     annotations: {
       originImageName: data.imageName,
+      ...(remoteStores.length ? { remoteStores: JSON.stringify(remoteStores) } : {}),
+      ...((data.networkStoreList || []).length
+        ? { networkStores: JSON.stringify(data.networkStoreList) }
+        : {}),
       [minReplicasKey]: `${data.hpa.use ? data.hpa.minReplicas : data.replicas}`,
       [maxReplicasKey]: `${data.hpa.use ? data.hpa.maxReplicas : data.replicas}`,
       [deployPVCResizeKey]: storageGiToQuantity(totalStorage).formatForDisplay({
@@ -94,8 +106,7 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
   };
   const templateMetadata = {
     labels: {
-      app: data.appName,
-      restartTime: `${dayjs().format('YYYYMMDDHHmmss')}`
+      app: data.appName
     }
   };
   const imagePullSecrets = data.secret.use
@@ -107,7 +118,11 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
     : undefined;
   const commonContainer = {
     name: data.appName,
-    image: `${data.secret.use ? `${data.secret.serverAddress}/` : ''}${data.imageName}`,
+    image: resolveImageRegistryBinding({
+      imageName: data.imageName,
+      credentialRegistry: data.secret.serverAddress,
+      useCredentials: data.secret.use
+    }).imageName,
     env:
       data.envs.length > 0
         ? data.envs.map((env) => ({
@@ -120,12 +135,13 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
       requests: {
         cpu: cpuRequestQuantity(data.cpu).withFormat('DecimalSI').toString(),
         memory: memoryRequestQuantity(data.memory).withFormat('BinarySI').toString(),
-        ...(!!data.gpu?.type ? { [gpuResourceKey]: data.gpu.amount } : {})
+        ...(!!data.gpu?.type ? { [gpuResource]: data.gpu.amount } : {})
       },
       limits: {
         cpu: data.cpu.withFormat('DecimalSI').toString(),
         memory: data.memory.withFormat('BinarySI').toString(),
-        ...(!!data.gpu?.type ? { [gpuResourceKey]: data.gpu.amount } : {})
+        ...(data.ephemeralStorage ? { 'ephemeral-storage': data.ephemeralStorage.toString() } : {}),
+        ...(!!data.gpu?.type ? { [gpuResource]: data.gpu.amount } : {})
       }
     },
     command: (() => {
@@ -144,10 +160,12 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
         return [data.cmdParam];
       }
     })(),
-    ports: data.networks.map((item, i) => ({
-      containerPort: item.port,
-      name: item.portName
-    })),
+    ports: ensureUniquePortNames(
+      data.networks.map((item, i) => ({
+        containerPort: item.port,
+        name: item.portName
+      }))
+    ),
     imagePullPolicy: 'Always'
   };
 
@@ -170,14 +188,49 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
 
   const configMapVolumes = generateConfigMapVolumes();
 
-  const finalVolumes = configMapVolumes
-    ? [...(data.volumes || []), ...configMapVolumes]
-    : data.volumes || [];
-
-  const finalVolumeMounts = [...(data.volumeMounts || []), ...configMapVolumeMounts];
+  const referencedStores = [...remoteStores, ...(data.networkStoreList || [])];
+  const managedNames = new Set([...referencedStores.map((store) => store.name), 'shared-memory']);
+  const volumeNameFor = (store: { name: string; path: string }) => {
+    const spec = data.originalWorkload?.spec?.template?.spec;
+    return (
+      spec?.volumes?.find(
+        (v: any) =>
+          v.persistentVolumeClaim?.claimName === store.name &&
+          spec.containers?.[0]?.volumeMounts?.some(
+            (m: any) => m.name === v.name && m.mountPath === store.path
+          )
+      )?.name || store.name
+    );
+  };
+  const sharedMemoryName =
+    data.originalWorkload?.spec?.template?.spec?.containers?.[0]?.volumeMounts?.find(
+      (m: any) => m.mountPath === '/dev/shm'
+    )?.name || 'shared-memory';
+  const finalVolumes = [
+    ...(data.volumes || []).filter((volume) => !managedNames.has(volume.name)),
+    ...configMapVolumes,
+    ...referencedStores.map((store) => ({
+      name: volumeNameFor(store),
+      persistentVolumeClaim: { claimName: store.name }
+    })),
+    ...(data.sharedMemory?.enabled
+      ? [
+          {
+            name: sharedMemoryName,
+            emptyDir: { medium: 'Memory', sizeLimit: data.sharedMemory.sizeLimit.toString() }
+          }
+        ]
+      : [])
+  ];
+  const finalVolumeMounts = [
+    ...(data.volumeMounts || []).filter((mount) => !managedNames.has(mount.name)),
+    ...configMapVolumeMounts,
+    ...referencedStores.map((store) => ({ name: volumeNameFor(store), mountPath: store.path })),
+    ...(data.sharedMemory?.enabled ? [{ name: sharedMemoryName, mountPath: '/dev/shm' }] : [])
+  ];
 
   // pvc settings
-  const storageTemplates = data.storeList.map((store) => ({
+  const storageTemplates = localStores.map((store) => ({
     metadata: {
       annotations: {
         path: store.path,
@@ -190,6 +243,7 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
       name: store.name
     },
     spec: {
+      ...(store.storageClassName ? { storageClassName: store.storageClassName } : {}),
       accessModes: ['ReadWriteOnce'],
       resources: {
         requests: {
@@ -203,9 +257,11 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
   const gpuMap = !!data.gpu?.type
     ? {
         restartPolicy: 'Always',
-        runtimeClassName: 'nvidia',
+        ...(data.gpu?.manufacturers === 'nvidia' ? { runtimeClassName: 'nvidia' } : {}),
         nodeSelector: {
-          [gpuNodeSelectorKey]: data.gpu.type
+          [data.gpu?.manufacturers && data.gpu.manufacturers !== 'nvidia'
+            ? `${data.gpu.manufacturers}.com/gpu.product`
+            : gpuNodeSelectorKey]: data.gpu.type
         }
       }
     : {};
@@ -236,6 +292,7 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
               }
             ],
             ...gpuMap,
+            ...(data.tolerations !== undefined ? { tolerations: data.tolerations } : {}),
             volumes: finalVolumes
           }
         }
@@ -266,7 +323,7 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
                 ...commonContainer,
                 volumeMounts: [
                   ...finalVolumeMounts,
-                  ...data.storeList.map((item) => ({
+                  ...localStores.map((item) => ({
                     name: item.name,
                     mountPath: item.path
                   }))
@@ -274,6 +331,7 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
               }
             ],
             ...gpuMap,
+            ...(data.tolerations !== undefined ? { tolerations: data.tolerations } : {}),
             volumes: finalVolumes
           }
         },
@@ -282,78 +340,59 @@ export const json2DeployCr = (data: AppEditType, type: 'deployment' | 'statefuls
     }
   };
 
-  return yaml.dump(template[type]);
+  return yaml.dump(preserveWorkloadFields(data, template[type]));
 };
 
 export const json2Service = (data: AppEditType) => {
-  const openPublicPorts: any[] = [];
-  const closedPublicPorts: any[] = [];
-
-  data.networks.forEach((network, i) => {
-    const port = {
-      port: str2Num(network.port),
-      targetPort: str2Num(network.port),
-      ...(network.openNodePort && network.nodePort
-        ? {
-            nodePort: str2Num(network.nodePort)
-          }
-        : {}),
-      name: network.portName,
-      protocol: network.protocol
-    };
-
-    if (network.openNodePort) {
-      openPublicPorts.push(port);
-    } else {
-      closedPublicPorts.push(port);
-    }
-  });
-
-  const serviceName = getServiceName(data, false);
-
-  const template = {
-    apiVersion: 'v1',
-    kind: 'Service',
-    metadata: {
-      name: serviceName,
-      labels: {
-        [appDeployKey]: data.appName
-      }
-    },
-    spec: {
-      ports: closedPublicPorts,
-      selector: {
-        app: data.appName
-      }
-    }
-  };
-
-  const serviceNameNodePort = getServiceName(data, true);
-
-  const templateNodePort = {
-    apiVersion: 'v1',
-    kind: 'Service',
-    metadata: {
-      name: serviceNameNodePort,
-      labels: {
-        [appDeployKey]: data.appName
-      }
-    },
-    spec: {
-      type: 'NodePort',
-      ports: openPublicPorts,
-      selector: {
-        app: data.appName
-      }
-    }
-  };
-
-  const clusterIpYaml = closedPublicPorts.length > 0 ? yaml.dump(template) : '';
-  const nodePortYaml = openPublicPorts.length > 0 ? yaml.dump(templateNodePort) : '';
-
-  return clusterIpYaml && nodePortYaml
-    ? `${clusterIpYaml}\n---\n${nodePortYaml}`
-    : `${clusterIpYaml}${nodePortYaml}`;
+  const groups = new Map<string, AppEditType['networks']>();
+  for (const network of data.networks) {
+    const name = network.serviceName || getServiceName(data, network.openNodePort);
+    groups.set(name, [...(groups.get(name) || []), network]);
+  }
+  return [...groups.entries()]
+    .sort(
+      (a, b) => Number(a[1].some((n) => n.openNodePort)) - Number(b[1].some((n) => n.openNodePort))
+    )
+    .map(([name, networks]) => {
+      const original = data.originalResources?.find(
+        (resource) => resource.kind === 'Service' && resource.metadata?.name === name
+      ) as any;
+      const nodePort = networks.some((network) => network.openNodePort);
+      const service = {
+        apiVersion: 'v1',
+        kind: 'Service',
+        metadata: {
+          ...original?.metadata,
+          name,
+          labels: { ...original?.metadata?.labels, [appDeployKey]: data.appName }
+        },
+        spec: {
+          ...original?.spec,
+          type: nodePort ? 'NodePort' : 'ClusterIP',
+          selector: original?.spec?.selector || { app: data.appName },
+          ports: ensureUniquePortNames(
+            networks.map((network) => {
+              const old = original?.spec?.ports?.find(
+                (port: any) => port.name === network.portName
+              );
+              return {
+                ...old,
+                name: network.portName,
+                port: network.port,
+                targetPort: old?.port === network.port ? old.targetPort : network.port,
+                protocol: network.protocol,
+                ...(nodePort && network.appProtocol
+                  ? { appProtocol: network.appProtocol.toLowerCase() }
+                  : {}),
+                nodePort: nodePort ? network.nodePort : undefined
+              };
+            })
+          )
+        }
+      };
+      return yaml.dump(service);
+    })
+    .join('\n---\n');
 };
 
 export const json2Ingress = (
@@ -361,6 +400,8 @@ export const json2Ingress = (
   userDomains: { name: string; secretName: string }[],
   options: {
     disableHttps?: boolean;
+    customDomainMode?: 'cname' | 'certificate';
+    customDomainCertificateSecretName?: string;
   } = {}
 ) => {
   const disableHttps = options.disableHttps ?? false;
@@ -393,52 +434,81 @@ export const json2Ingress = (
         : `${network.publicDomain}.${network.domain}`;
 
       const secretName = network.customDomain
-        ? network.networkName
+        ? options.customDomainMode === 'certificate'
+          ? options.customDomainCertificateSecretName || 'wildcard-cert'
+          : network.networkName
         : userDomains.find((domain) => domain.name === network.domain)?.secretName ||
           'wildcard-cert';
       // Ingress only uses ClusterIP services, not NodePort
-      const serviceName = getServiceName(data, false);
+      const serviceName = network.serviceName || getServiceName(data, false);
 
+      const originalIngress = data.originalResources?.find(
+        (resource) => resource.kind === 'Ingress' && resource.metadata?.name === network.networkName
+      ) as any;
       const ingress: any = {
         apiVersion: 'networking.k8s.io/v1',
         kind: 'Ingress',
         metadata: {
+          ...originalIngress?.metadata,
           name: network.networkName,
           labels: {
             [appDeployKey]: data.appName,
-            [publicDomainKey]: network.publicDomain
+            ...originalIngress?.metadata?.labels,
+            [publicDomainKey]: network.publicDomain,
+            [publicDomainPortKey]: String(network.port)
           },
           annotations: {
-            'kubernetes.io/ingress.class': 'nginx',
+            ...originalIngress?.metadata?.annotations,
+            'kubernetes.io/ingress.class':
+              originalIngress?.metadata?.annotations?.['kubernetes.io/ingress.class'] || 'nginx',
             'nginx.ingress.kubernetes.io/proxy-body-size': '32m',
             ...map[network.appProtocol ?? 'HTTP']
           }
         },
         spec: {
+          ...originalIngress?.spec,
           rules: [
             {
               host,
               http: {
-                paths: [
-                  {
-                    pathType: 'Prefix',
-                    path: '/',
-                    backend: {
-                      service: {
-                        name: serviceName,
-                        port: {
-                          number: network.port
-                        }
+                paths: (network.routes?.length
+                  ? network.routes
+                  : [
+                      {
+                        path: '/',
+                        pathType: 'Prefix',
+                        serviceName: network.serviceName || serviceName,
+                        servicePort: network.port,
+                        servicePortName: undefined
                       }
+                    ]
+                ).map((route) => ({
+                  pathType: route.pathType,
+                  path: route.path,
+                  backend: {
+                    service: {
+                      name: route.serviceName || network.serviceName || serviceName,
+                      port: route.servicePortName
+                        ? { name: route.servicePortName }
+                        : { number: route.servicePort || network.port }
                     }
                   }
-                ]
+                }))
               }
             }
           ]
         }
       };
-      if (!disableHttps) {
+      if (originalIngress?.spec?.rules?.length > 1)
+        ingress.spec.rules.push(...originalIngress.spec.rules.slice(1));
+      if (disableHttps) delete ingress.spec.tls;
+      if (
+        !disableHttps &&
+        originalIngress?.spec?.rules?.[0]?.host === host &&
+        originalIngress?.spec?.tls
+      ) {
+        ingress.spec.tls = originalIngress.spec.tls;
+      } else if (!disableHttps) {
         ingress.spec.tls = [
           {
             hosts: [host],
@@ -495,7 +565,7 @@ export const json2Ingress = (
       };
 
       let resYaml = yaml.dump(ingress);
-      if (network.customDomain && !disableHttps) {
+      if (network.customDomain && !disableHttps && options.customDomainMode !== 'certificate') {
         resYaml += `\n---\n${yaml.dump(issuer)}\n---\n${yaml.dump(certificate)}`;
       }
       return resYaml;
@@ -526,24 +596,33 @@ export const json2ConfigMap = (data: AppEditType) => {
     configFile[item.key] = item.value;
   });
 
+  const original = data.originalResources?.find(resource => resource.kind === 'ConfigMap' && resource.metadata?.name === data.appName);
   const template = {
+    ...original,
     apiVersion: 'v1',
     kind: 'ConfigMap',
     metadata: {
+      ...original?.metadata,
       name: data.appName
     },
-    data: configFile
+    data: { ...original?.data, ...configFile }
   };
 
   return yaml.dump(template);
 };
 
 export const json2Secret = (data: AppEditType) => {
+  const binding = resolveImageRegistryBinding({
+    imageName: data.imageName,
+    credentialRegistry: data.secret.serverAddress,
+    useCredentials: data.secret.use,
+    requireCredentialMatch: true
+  });
   const auth = strToBase64(`${data.secret.username}:${data.secret.password}`);
   const dockerconfigjson = strToBase64(
     JSON.stringify({
       auths: {
-        [data.secret.serverAddress || '']: {
+        [binding.registry]: {
           username: data.secret.username,
           password: data.secret.password,
           auth
@@ -566,7 +645,8 @@ export const json2Secret = (data: AppEditType) => {
   return yaml.dump(template);
 };
 export const json2HPA = (data: AppEditType) => {
-  const isDeployment = data.storeList?.length === 0;
+  const isDeployment =
+    data.kind !== 'statefulset' && !data.storeList?.some((store) => store.storageType !== 'remote');
 
   const template = {
     apiVersion: 'autoscaling/v2',
@@ -634,5 +714,148 @@ export const json2HPA = (data: AppEditType) => {
       })
     }
   };
+  const original = data.originalResources?.find((r) => r.kind === 'HorizontalPodAutoscaler') as any;
+  if (original) {
+    const oldMetric = original.spec?.metrics?.[0];
+    const oldTarget =
+      oldMetric?.pods?.metric?.name === 'DCGM_FI_DEV_GPU_UTIL'
+        ? 'gpu'
+        : oldMetric?.resource?.name || 'cpu';
+    const oldValue =
+      oldTarget === 'gpu'
+        ? Number(oldMetric?.pods?.target?.averageValue)
+        : oldMetric?.resource?.target?.averageUtilization / 10;
+    template.metadata = { ...original.metadata, ...template.metadata };
+    template.spec = {
+      ...original.spec,
+      ...template.spec,
+      ...(original.spec?.behavior ? { behavior: original.spec.behavior } : {})
+    };
+    if (oldTarget === data.hpa.target && oldValue === data.hpa.value)
+      template.spec.metrics = original.spec.metrics;
+  }
   return yaml.dump(template);
+};
+
+const getExplicitImageRegistryAddress = (imageName: string): string | undefined => {
+  const components = imageName.trim().split('/');
+  const firstComponent = components[0];
+  if (
+    components.length > 1 &&
+    firstComponent &&
+    (firstComponent === 'localhost' || firstComponent.includes('.') || firstComponent.includes(':'))
+  ) {
+    return firstComponent;
+  }
+  return undefined;
+};
+
+const dockerHubRegistryAliases = new Set(['docker.io', 'index.docker.io', 'index.docker.io/v1']);
+
+const normalizeRegistryAddress = (serverAddress: string) => {
+  const normalized = serverAddress
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/g, '')
+    .toLowerCase();
+
+  return dockerHubRegistryAliases.has(normalized) ? 'docker.io' : normalized;
+};
+
+export const getImageRegistryAddress = (imageName: string): string =>
+  normalizeRegistryAddress(getExplicitImageRegistryAddress(imageName) || 'docker.io');
+
+const registryCredentialsCoverImage = (imageName: string, credentialRegistry: string) => {
+  const explicitRegistry = getExplicitImageRegistryAddress(imageName);
+  if (!explicitRegistry) {
+    return normalizeRegistryAddress(credentialRegistry) === 'docker.io';
+  }
+
+  const normalizedImageRegistry = normalizeRegistryAddress(explicitRegistry);
+  const normalizedCredentialRegistry = normalizeRegistryAddress(credentialRegistry);
+  if (normalizedCredentialRegistry === normalizedImageRegistry) {
+    return true;
+  }
+
+  const normalizedImageName = `${normalizedImageRegistry}${imageName
+    .trim()
+    .slice(explicitRegistry.length)
+    .toLowerCase()}`;
+  return normalizedImageName.startsWith(`${normalizedCredentialRegistry}/`);
+};
+
+export const alignImageRegistrySecret = (
+  imageName: string,
+  secret: AppEditType['secret']
+): AppEditType['secret'] => {
+  const imageRegistry = getImageRegistryAddress(imageName);
+  const credentialRegistry = normalizeRegistryAddress(secret.serverAddress);
+
+  if (
+    credentialRegistry === imageRegistry ||
+    registryCredentialsCoverImage(imageName, secret.serverAddress)
+  ) {
+    return secret;
+  }
+
+  return {
+    ...secret,
+    username: '',
+    password: '',
+    serverAddress: imageRegistry
+  };
+};
+
+export const getBoundImageRegistryCredentials = (
+  imageName: string,
+  secret: AppEditType['secret']
+) => {
+  const imageRegistry = getImageRegistryAddress(imageName);
+  if (!secret.use || !registryCredentialsCoverImage(imageName, secret.serverAddress)) {
+    return undefined;
+  }
+
+  return {
+    username: secret.username,
+    password: secret.password,
+    serverAddress: imageRegistry
+  };
+};
+
+export const resolveImageRegistryBinding = ({
+  imageName: rawImageName,
+  credentialRegistry: rawCredentialRegistry,
+  useCredentials,
+  requireCredentialMatch = false
+}: {
+  imageName: string;
+  credentialRegistry?: string;
+  useCredentials: boolean;
+  requireCredentialMatch?: boolean;
+}) => {
+  const imageName = rawImageName.trim();
+  const explicitRegistry = getExplicitImageRegistryAddress(imageName);
+  const normalizedExplicitRegistry = explicitRegistry
+    ? normalizeRegistryAddress(explicitRegistry)
+    : undefined;
+  const credentialRegistry = useCredentials
+    ? normalizeRegistryAddress(rawCredentialRegistry || '')
+    : '';
+
+  if (
+    requireCredentialMatch &&
+    normalizedExplicitRegistry &&
+    credentialRegistry &&
+    !registryCredentialsCoverImage(imageName, credentialRegistry)
+  ) {
+    throw new Error('Image registry credentials do not match the image registry');
+  }
+
+  const registry = credentialRegistry || normalizedExplicitRegistry || 'docker.io';
+  const resolvedImageName =
+    useCredentials && !explicitRegistry && registry !== 'docker.io' && imageName
+      ? `${registry}/${imageName}`
+      : imageName;
+
+  return { imageName: resolvedImageName, registry };
 };

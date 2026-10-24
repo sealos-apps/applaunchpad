@@ -1,3 +1,4 @@
+import { checkPodExecPermission } from '@/api/app';
 import {
   kubeFile_delete,
   kubeFile_ls,
@@ -96,6 +97,12 @@ const PodFile = ({
       : { name: '/', path: '/', value: storageGiToQuantity(10) }
   );
 
+  const permission = useQuery(
+    ['pod-exec-permission', podDetail.podName],
+    () => checkPodExecPermission(podDetail.podName),
+    { enabled: isOpen, retry: false }
+  );
+  const canWrite = permission.data?.allowed === true;
   const [fileProgress, setFileProgress] = useState<number>(0);
   const containerName = getPodContainerName(podDetail);
   const [basePath, setBasePath] = useState(storeDetail?.path || '/');
@@ -265,6 +272,7 @@ const PodFile = ({
   };
 
   const handleDelete = async (file: TFile) => {
+    if (!canWrite) return;
     try {
       await kubeFile_delete({
         podName: podDetail.podName,
@@ -280,6 +288,7 @@ const PodFile = ({
   };
 
   const handleRename = async (file: TFile, newName: string) => {
+    if (!canWrite) return;
     try {
       if (!file || !newName || newName === file.name) return;
       const from = file.path;
@@ -365,6 +374,7 @@ const PodFile = ({
   };
 
   const uploadFile = async (files: File[]) => {
+    if (!canWrite) return;
     setIsUploadLoading(true);
     try {
       const filteredFiles = files.filter((file) => {
@@ -408,6 +418,7 @@ const PodFile = ({
   };
 
   const handleCreateFolderConfirm = async () => {
+    if (!canWrite) return;
     try {
       if (!folderName.trim()) return;
       await kubeFile_mkdir({
@@ -576,7 +587,7 @@ const PodFile = ({
                           <Button
                             className="w-[80px] h-10 bg-neutral-950"
                             onClick={handleCreateFolderConfirm}
-                            disabled={!folderName.trim()}
+                            disabled={!canWrite || !folderName.trim()}
                           >
                             {t('Confirm')}
                           </Button>
@@ -587,7 +598,7 @@ const PodFile = ({
                   <Button
                     variant="outline"
                     className="h-9 rounded-lg"
-                    disabled={isUploadLoading}
+                    disabled={!canWrite || isUploadLoading}
                     onClick={openUploadFile}
                   >
                     {isUploadLoading ? (

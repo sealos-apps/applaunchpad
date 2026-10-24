@@ -1,3 +1,4 @@
+import { ensureResourcePublicDomainsAvailable } from '@/services/backend/publicDomain';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ApiResp } from '@/services/kubernet';
 import { authSession } from '@/services/backend/auth';
@@ -48,11 +49,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return;
     }
 
-    const { applyYamlList } = await getK8s({
+    const k8s = await getK8s({
       kubeconfig: await authSession(req.headers)
     });
 
-    const applyRes = await applyYamlList(yamlList, mode);
+    if (mode === 'create' && mainWorkload) {
+      const exists = await Promise.all(
+        [
+          k8s.k8sApp.readNamespacedDeployment(mainWorkload.metadata.name, k8s.namespace),
+          k8s.k8sApp.readNamespacedStatefulSet(mainWorkload.metadata.name, k8s.namespace)
+        ].map((request) =>
+          request
+            .then(() => true)
+            .catch((error) => {
+              if ((error.body?.code || error.response?.statusCode) === 404) return false;
+              throw error;
+            })
+        )
+      );
+      if (exists.some(Boolean)) return jsonRes(res, { code: ResponseCode.APP_ALREADY_EXISTS });
+    }
+    await ensureResourcePublicDomainsAvailable(allResources, k8s);
+    const applyRes = await k8s.applyYamlList(yamlList, mode);
 
     jsonRes(res, { data: applyRes.map((item) => item.kind) });
   } catch (err: any) {

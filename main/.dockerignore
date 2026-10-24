@@ -32,3 +32,7 @@ coverage
 
 .DS_Store
 **/.DS_Store
+
+**/config.local.yaml
+**/config.yaml.local
+**/*.tsbuildinfo

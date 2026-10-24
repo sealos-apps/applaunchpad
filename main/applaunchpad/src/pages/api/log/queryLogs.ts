@@ -1,3 +1,4 @@
+import { toVlogsQueryTime } from '@/utils/vlogsTime';
 import { JsonFilterItem } from '@/pages/app/detail/logs';
 import { authSession } from '@/services/backend/auth';
 import { getK8s } from '@/services/backend/kubernetes';
@@ -10,8 +11,8 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 export interface LogQueryPayload {
   app?: string;
   time?: string;
-  startTime?: string;
-  endTime?: string;
+  startTime?: string | number;
+  endTime?: string | number;
   namespace?: string;
   limit?: string;
   jsonMode?: string;
@@ -73,7 +74,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     } = req.body as LogQueryPayload;
 
     const params: LogQueryPayload = {
-      ...(startTime && endTime ? { startTime, endTime } : { time }),
+      ...(startTime !== undefined && endTime !== undefined
+        ? { startTime: toVlogsQueryTime(startTime), endTime: toVlogsQueryTime(endTime) }
+        : { time }),
       namespace: namespace,
       app: app,
       limit: limit,

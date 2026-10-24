@@ -42,6 +42,17 @@ export const hydrateLegacyAppFormData = <T extends Partial<AppEditType>>(appForm
     ...appForm,
     ...(appForm.cpu !== undefined ? { cpu: hydrateLegacyCpu(appForm.cpu) } : {}),
     ...(appForm.memory !== undefined ? { memory: hydrateLegacyMemory(appForm.memory) } : {}),
+    ...(appForm.ephemeralStorage !== undefined
+      ? { ephemeralStorage: hydrateLegacyStorage(appForm.ephemeralStorage) }
+      : {}),
+    ...(appForm.sharedMemory
+      ? {
+          sharedMemory: {
+            ...appForm.sharedMemory,
+            sizeLimit: hydrateLegacyStorage(appForm.sharedMemory.sizeLimit)
+          }
+        }
+      : {}),
     ...(appForm.storeList
       ? {
           storeList: appForm.storeList.map((store) => ({

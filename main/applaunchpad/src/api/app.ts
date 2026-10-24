@@ -8,6 +8,7 @@ import { PodListQueryPayload } from '@/pages/api/log/queryPodList';
 import { NetworkMonitorDataResult } from '@/services/networkMonitorFetch';
 import { track } from '@sealos/gtm';
 import { Quantity } from '@sealos/shared';
+import { hydrateLegacyAppFormData } from '@/utils/hydrateLegacyAppForm';
 import { quantityFromJSONOrZero } from '@/utils/resourceQuantity';
 
 export const postDeployApp = (yamlList: string[], mode: 'create' | 'replace' = 'create') =>
@@ -40,7 +41,7 @@ const hydrateQuantity = (value: unknown): Quantity =>
   value instanceof Quantity ? value : quantityFromJSONOrZero(value);
 
 const hydrateAppDetail = (app: AppDetailType): AppDetailType => ({
-  ...app,
+  ...hydrateLegacyAppFormData(app),
   cpu: hydrateQuantity(app.cpu),
   memory: hydrateQuantity(app.memory),
   storeList: app.storeList.map((store) => ({
@@ -197,3 +198,6 @@ export const setAppRemark = (payload: {
   remark: string;
   kind: 'deployment' | 'statefulset';
 }) => POST('/api/remark', payload);
+
+export const checkPodExecPermission = (podName: string) =>
+  GET<{ allowed: boolean }>('/api/checkPodExecPermission', { podName });

@@ -12,6 +12,7 @@ data:
       port: {{ include "applaunchpad-frontend.mainConfigPort" . }}
       httpPort: {{ include "applaunchpad-frontend.mainConfigHTTPPort" . }}
       disableHttps: {{ .Values.applaunchpadConfig.disableHttps }}
+      nodePortHost: {{ .Values.applaunchpadConfig.nodePortHost | quote }}
       desktopDomain: {{ .Values.applaunchpadConfig.cloudDomain | quote }}
       userDomains:
         - name: {{ .Values.applaunchpadConfig.cloudDomain | quote }}
@@ -19,25 +20,31 @@ data:
     launchpad:
       infrastructure:
         provider: alibaba
-        requiresIcpReg: false
+        requiresIcpReg: {{ .Values.applaunchpadConfig.requiresDomainReg }}
         icpRegQueryLink: https://beian.miit.gov.cn/#/Integrated/index
         domainBindingDocumentationLink: null
       features:
-        guide: false
-        api: false
-        gpu: false
+        guide: {{ .Values.applaunchpadConfig.guideEnabled }}
+        api: {{ .Values.applaunchpadConfig.apiEnabled }}
+        gpu: {{ .Values.applaunchpadConfig.gpuEnabled }}
+        networkStorage: {{ .Values.applaunchpadConfig.networkStorageEnabled }}
       ui:
         meta:
           title: "Sealos App Launchpad"
           description: "Deploy and manage your applications on Sealos"
           scripts: []
         appResourceFormSliderConfig:
-          default:
-            cpu: [100, 200, 500, 1000, 2000, 3000, 4000, 8000]
-            memory: [64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384]
-          default-gpu:
-            cpu: [8000, 16000, 32000, 48000, 64000, 80000, 108000]
-            memory: [16384, 32768, 65536, 131072, 262144, 524288, 614400]
+          {{- toYaml .Values.applaunchpadConfig.appResourceFormSliderConfig | nindent 10 }}
+      imagePorts:
+        enabled: {{ .Values.applaunchpadConfig.imagePortsEnabled }}
+        trustedRegistries: {{ .Values.applaunchpadConfig.imagePortsTrustedRegistries | toJson }}
+      publicDomain:
+        customPrefixEnabled: {{ .Values.applaunchpadConfig.customPublicDomainPrefixEnabled }}
+        reservedPrefixes: {{ .Values.applaunchpadConfig.publicDomainReservedPrefixes | toJson }}
+      customDomain:
+        mode: {{ .Values.applaunchpadConfig.customDomainMode | quote }}
+        certificate:
+          tlsSecretName: {{ .Values.applaunchpadConfig.customDomainCertificateSecretName | quote }}
       components:
         monitoring:
           url: {{ .Values.applaunchpadConfig.monitorUrl | quote }}
@@ -51,8 +58,8 @@ data:
           url: https://fastgpt.run/api/openapi/v1
           fastGPTKey: ""
       fileManager:
-        uploadLimit: 50 # MB
-        downloadLimit: 100 # MB
+        uploadLimit: {{ .Values.applaunchpadConfig.fileManger.uploadLimit }}
+        downloadLimit: {{ .Values.applaunchpadConfig.fileManger.downloadLimit }}
       analytics:
         gtm:
           enabled: false
@@ -65,5 +72,5 @@ data:
         endpoint: cdn.aliyuncs.com
         accessKeyID: ''
         accessKeySecret: ''
-      domainChallengeSecret: default-dev-secret-change-in-production
-      pvcStorageMax: 100
+      domainChallengeSecret: {{ .Values.applaunchpadConfig.domainChallengeSecret | quote }}
+      pvcStorageMax: {{ .Values.applaunchpadConfig.pvcStorageMax }}

@@ -158,12 +158,12 @@ describe('json2Service', () => {
     expect(serviceName.length - app.appName.length).toBe(22);
   });
 
-  it('keeps the numeric-prefix app name invalidity visible before apply', () => {
+  it('generates a valid Service name for existing numeric-prefix applications', () => {
     const app = createApp('', true);
     app.appName = '111111hello-world';
 
     const objects = yamlString2Objects(json2Service(app)) as any[];
 
-    expect(objects[0].metadata.name).toMatch(/^111111hello-world-nodeport-[a-z]{12}$/);
+    expect(objects[0].metadata.name).toMatch(/^app-111111hello-world-nodeport-[a-z]{12}$/);
   });
 });

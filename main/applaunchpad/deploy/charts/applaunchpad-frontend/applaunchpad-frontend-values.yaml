@@ -10,3 +10,14 @@ resources:
   requests:
     cpu: 10m
     memory: 128Mi
+# Optional capabilities (defaults remain safe for a plain cluster):
+# applaunchpadConfig:
+#   networkStorageEnabled: true
+#   imagePortsEnabled: true
+#   customPublicDomainPrefixEnabled: true
+#   nodePortHost: "node.example.com"
+#   customDomainMode: certificate
+#   customDomainCertificateSecretName: wildcard-cert
+# certificateRbac:
+#   enabled: true
+# See ../../README.md and values.yaml for all defaults and upgrade instructions.

@@ -8,3 +8,5 @@ export interface YamlItemType {
 }
 
 export type { FormSliderListType } from './config';
+
+export type CustomDomainMode = 'cname' | 'certificate';

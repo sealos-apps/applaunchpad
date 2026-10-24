@@ -1,3 +1,4 @@
+import { deleteOwnedClaims } from '@/services/backend/storageOwnership';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { ApiResp } from '@/services/kubernet';
 import { authSession } from '@/services/backend/auth';
@@ -112,15 +113,7 @@ export async function DeleteAppByName({ name, req }: DeleteAppParams & { req: Ne
       `${appDeployKey}=${name}`
     ),
     // delete pvc
-    k8sCore.deleteCollectionNamespacedPersistentVolumeClaim(
-      namespace,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      `app=${name}`
-    ),
+    deleteOwnedClaims(name, namespace, k8sApp, k8sCore),
     k8sAutoscaling.deleteNamespacedHorizontalPodAutoscaler(name, namespace) // delete HorizontalPodAutoscaler
   ]);
 

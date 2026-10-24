@@ -161,8 +161,8 @@ const AppMainInfo = ({ app = MOCK_APP_DETAIL }: { app: AppDetailType }) => {
             }.${getUserNamespace()}.svc.cluster.local:${network.port}`,
             public: network.nodePort
               ? buildExternalUrl({
-                  protocol: network.protocol,
-                  host: `${protocol?.value.toLowerCase()}.${network.domain}`,
+                  protocol: network.appProtocol || network.protocol,
+                  host: config.nodePortHost || `${protocol?.value.toLowerCase()}.${network.domain}`,
                   nodePort: network.nodePort
                 })
               : `${getExternalProtocol(network.protocol)}://${protocol?.value.toLowerCase()}.${

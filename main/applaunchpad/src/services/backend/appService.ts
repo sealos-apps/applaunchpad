@@ -1,3 +1,5 @@
+import { deleteOwnedClaims } from '@/services/backend/storageOwnership';
+import { ensurePublicDomainPrefixesAvailable } from './publicDomain';
 import { appDeployKey, pauseKey, minReplicasKey, maxReplicasKey } from '@/constants/app';
 import { formData2Yamls } from '@/pages/app/edit';
 import { Config } from '@/config';
@@ -125,7 +127,13 @@ export async function createApp(appForm: AppEditType, k8s: K8sContext) {
     domain: Config().cloud.domain
   }));
 
-  const parseYamls = formData2Yamls(appForm, Config().cloud.userDomains);
+  await ensurePublicDomainPrefixesAvailable(appForm, k8s);
+  const config = Config();
+  const parseYamls = formData2Yamls(appForm, config.cloud.userDomains, {
+    disableHttps: config.cloud.disableHttps,
+    customDomainMode: config.launchpad.customDomain?.mode,
+    customDomainCertificateSecretName: config.launchpad.customDomain?.certificate?.tlsSecretName
+  });
   const yamls = parseYamls.map((item) => item.value);
 
   await applyYamlList(yamls, 'create');
@@ -500,15 +508,7 @@ export async function deleteAppByName(name: string, k8s: K8sContext) {
       undefined,
       `${appDeployKey}=${name}`
     ),
-    k8sCore.deleteCollectionNamespacedPersistentVolumeClaim(
-      namespace,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      `app=${name}`
-    ),
+    deleteOwnedClaims(name, namespace, k8sApp, k8sCore),
     k8sAutoscaling.deleteNamespacedHorizontalPodAutoscaler(name, namespace)
   ]);
 
