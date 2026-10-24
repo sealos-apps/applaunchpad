@@ -1,95 +1,65 @@
 # AppLaunchpad
 
-AppLaunchpad uses one implementation in `main/` for both public and private Sealos.
-`release-v5.1` is a compatibility symlink to `main`, keeping existing build paths,
-image tags, and offline archive consumers working without maintaining a second source tree.
+The repository root is the pnpm workspace for public and private Sealos.
 
-- `main/applaunchpad/`: application, APIs, tests, and deployment files.
-- `main/packages/`: shared workspace packages.
-- [Deployment and migration guide](main/applaunchpad/deploy/README.md): configuration,
-  legacy YAML compatibility, storage safety, upgrade and rollback instructions.
+- `applaunchpad/`: application, APIs, tests, and deployment files.
+- `packages/ui/`: local Chakra UI theme and components. Driver, analytics, shared utilities, Desktop integration, and shadcn UI use version-pinned `@labring/sealos-*` npm packages declared in `applaunchpad/package.json`.
+- `Dockerfile`, `Makefile`, `package.json`, and `pnpm-workspace.yaml`: root build entrypoints.
+- [Deployment guide](applaunchpad/deploy/README.md): configuration, storage safety,
+  upgrade and rollback instructions.
 
-Run `pnpm install --frozen-lockfile` in `main`, then
-`pnpm --filter applaunchpad run test:unit` and `pnpm --filter applaunchpad run build`.
+Run from the repository root with Node 20.20.2 and pnpm 8.9.0:
 
-## CI and OSS archives
-
-CI validates the unified source and publishes amd64/arm64 runtime and cluster
-images on pushes to `main` and automatically uploads the cluster archives and their
-MD5 checksums to OSS. They are also retained as GitHub Actions artifacts for 7 days.
-
-To upload the archives outside a push to `main`, run **AppLaunchpad Images** manually with
-`upload_oss` enabled. This also publishes the images required to build the archives;
-`publish_images` alone does not upload to OSS.
-
-Configure repository secrets `OSS_ENDPOINT`, `OSS_ACCESS_KEY_ID`, and
-`OSS_ACCESS_KEY_SECRET`, plus the repository variable `OSS_BUCKET` containing the
-bucket and app prefix (for example, `sealos-io/offline/sealos-apps/applaunchpad`).
-Archives are uploaded to:
-
-```text
-oss://<OSS_BUCKET>/ci/<snapshot>/<short-sha>/applaunchpad-cluster-<snapshot>-<short-sha>-<arch>.tar.gz
+```sh
+pnpm install --frozen-lockfile
+pnpm dev-app
+pnpm --filter applaunchpad run test:unit
+pnpm --filter applaunchpad run build
+docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile -t <image> --push .
 ```
 
-Each archive has a matching `.tar.gz.md5` file. Distribution channels are `main` and
-`release-v5.1` (both use the same source); architectures are `amd64` and `arm64`. The upload checks that both
-architecture archives exist and verifies their checksums before uploading.
+## CI and releases
 
-## Version releases
+CI validates one workspace and publishes one set of runtime and cluster images for
+`linux/amd64` and `linux/arm64`. There are no per-snapshot build paths or distribution
+channels. Branch builds use `sha-<short-sha>` tags; version builds use the version tag
+itself, for example `v5.2.0-beta2`. Architecture-specific tags append `-amd64` or
+`-arm64`. Only pushes to the `main` branch update the `latest` manifest.
 
-Push a version tag such as `v5.2.0-beta2` **after the release workflow is included
-in that commit**. The workflow validates the unified source, builds and publishes
-`linux/amd64` and `linux/arm64` runtime and cluster images, uploads the offline
-archives to OSS, then attaches all four archives and their four MD5 files to the
-GitHub Release. A new Release stays in draft until the uploaded SHA-256 digests
-match the local files. Tags with a prerelease suffix (such as `-beta2` or `-rc1`)
-are marked as prereleases and are not marked as the latest GitHub Release.
+Push a version tag after the workflow is included in that commit. Supported tags are
+`v<major>.<minor>.<patch>` with an optional alphanumeric prerelease suffix separated
+by dots or hyphens. Build metadata (`+...`) is unsupported by Docker tags.
 
-Supported tags are `v<major>.<minor>.<patch>` with an optional alphanumeric
-prerelease suffix separated by dots or hyphens; build metadata (`+...`) is not
-supported because Docker tags cannot contain `+`.
+Cluster archives and MD5 files are retained as Actions artifacts for 7 days.
+Version releases upload two archives and two checksums to GitHub Release; the release
+stays in draft until every uploaded SHA-256 digest matches. Prereleases are not
+marked as latest. Existing historical releases and assets are not renamed.
 
-For `v5.2.0-beta2`, both GHCR image repositories use these tags:
-
-- `main-v5.2.0-beta2`
-- `release-v5.1-v5.2.0-beta2`
-
-Each is a multi-platform manifest; architecture-specific tags append `-amd64`
-or `-arm64`. Version releases do not change `latest` or `release-v5.1-latest`;
-those aliases are updated only by builds on the `main` branch.
-
-Release archives keep the snapshot and version in their names:
+OSS uploads run on main pushes and version releases. For manual branch runs,
+`upload_oss` also enables image publishing; `publish_images` alone does not upload.
+Configure secrets `OSS_ENDPOINT`, `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, and
+repository variable `OSS_BUCKET` (bucket and optional app prefix).
 
 ```text
-applaunchpad-cluster-<snapshot>-<tag>-<arch>.tar.gz
-oss://<OSS_BUCKET>/release/<tag>/<snapshot>/applaunchpad-cluster-<snapshot>-<tag>-<arch>.tar.gz
+oss://<OSS_BUCKET>/ci/<short-sha>/applaunchpad-cluster-sha-<short-sha>-<arch>.tar.gz
+oss://<OSS_BUCKET>/release/<tag>/applaunchpad-cluster-<tag>-<arch>.tar.gz
 ```
 
-The workflow reuses the existing OSS secrets and `OSS_BUCKET` variable described
-above. GitHub authentication uses the automatically supplied `GITHUB_TOKEN`
-(passed to `gh` as `GH_TOKEN`); `GH_REPO` selects the current repository.
-Only the GitHub release job has `contents: write`; image jobs retain
-`packages: write`. No new operator credentials or application environment
-variables are required.
-
-To retry a version release, rerun its failed Actions jobs, or dispatch
-**AppLaunchpad Images** with the tag as the ref:
+Each archive has a matching `.tar.gz.md5`. Both architectures and checksums are
+verified before upload. To retry, rerun failed jobs or dispatch the version ref:
 
 ```sh
 gh workflow run ci.yml --ref v5.2.0-beta2
 ```
 
-For tag refs, image publishing and OSS upload are always enabled, regardless of
-the two manual boolean inputs (which still default to false for branch refs).
-Reruns replace same-named Release attachments, preserve existing release notes,
-and verify the uploaded digests again. Tag runs are not cancelled by a newer run.
-Workflow changes do not apply retroactively to old tags: `v5.2.0-beta1` keeps its
-manually attached SHA-named archives and must not be moved to adopt this workflow.
+Version dispatches always publish images and archives. Reruns replace same-named
+assets, preserve release notes and verify digests again. Tag runs are not cancelled
+by newer runs. GitHub authentication uses `GITHUB_TOKEN`; only release publication
+has `contents: write`, while image publication has `packages: write`.
 
 ## Currency display upgrade
 
-AppLaunchpad now uses `@labring/sealos-desktop-sdk@0.1.24` (installed under the
-existing `sealos-desktop-sdk` import name). The application and shared components
+AppLaunchpad uses `@labring/sealos-desktop-sdk@0.1.24` directly. The application and shared components
 resolve the same published SDK. The unified source does not vendor or build a local SDK copy.
 
 Currency symbols come from Desktop's `desktop.layout.currencySymbol` through
@@ -99,40 +69,22 @@ standalone runs fall back to `shellCoin`. Upgrade Desktop **before AppLaunchpad*
 in `cny` or `usd` display environments. This changes symbols only, not prices,
 billing units, conversions, or backend billing currency.
 
-For manually mounted YAML, remove `launchpad.ui.currencySymbol` in `main` (its
-strict schema rejects the removed key), or `launchpad.currencySymbol` in
-`release-v5.1`. Keep all other fields, especially
-`launchpad.infrastructure.requiresDomainReg` in release YAML, unchanged.
-
-For release Helm values, replace `applaunchpadConfig.currencySymbol` with the
-independent boolean `applaunchpadConfig.requiresDomainReg`: old `shellCoin` means
-`true`, old `cny`/`usd` means `false`. Migrate saved/custom values explicitly before
-upgrading; merely using `--reuse-values` with an old non-shellCoin value would
-otherwise take the new default `true`. The main Chart no longer hardcodes a
-symbol and needs no replacement display setting.
-
-The release installer retains its original policy: `.global.billing.currency`
-equal to `cny` enables domain registration; all other values disable it. It now
-passes that boolean directly to Helm, independently of Desktop's display symbol.
-As before, installer-derived values override values files; an explicit
-`HELM_OPTIONS='--set applaunchpadConfig.requiresDomainReg=false'` (or `true`)
-can override the installer policy. Direct Helm installs default to `true`, as
-the previous default `shellCoin` did.
-
-Focused checks (after `pnpm install --frozen-lockfile` in each snapshot):
+Configure domain registration independently with
+`applaunchpadConfig.requiresDomainReg` (default `false`). The installer derives a
+default from platform billing currency; operator values and explicit Helm arguments
+can override it. See the deployment guide for configuration migration details.
 
 ```sh
-pnpm --dir main --filter applaunchpad run test:unit
-pnpm --dir release-v5.1 --filter applaunchpad exec vitest run __tests__/unit/store/host.test.ts __tests__/unit/pages/api/platform/getInitData.test.ts
+pnpm --filter applaunchpad run test:unit
 node scripts/test-currency-config.mjs # Helm required; no cluster access or deployment
 ```
 
-## Metrics SDK (both snapshots)
+## Metrics SDK
 
 Metrics APIs use `@labring/sealos-metrics-sdk@0.2.0` on the Next.js server,
 with a new client bound to each request's authenticated kubeconfig. CPU, memory,
-average usage, disk/storage and release GPU metrics retain their chart units;
-main network request count/percentage queries also use the SDK. The browser API
+average usage, disk/storage and GPU metrics retain their chart units;
+network request count/percentage queries also use the SDK. The browser API
 paths and response envelopes are unchanged. Logging still uses its separate log
 service.
 
@@ -143,8 +95,7 @@ readiness and the user's namespace permissions before querying metrics.
 
 Configure the endpoint with Helm `--set-string applaunchpadConfig.monitorUrl=<url>`;
 the Chart writes it into the mounted ConfigMap's `config.yaml`. The server reads
-`launchpad.components.monitoring.url` in main or
-`launchpad.components.monitor.url` in release-v5.1 directly from that file.
+`launchpad.components.monitoring.url` from that file.
 For standalone development, set the same YAML field in the local configuration.
 There is no metrics endpoint environment-variable override.
 
@@ -154,3 +105,5 @@ retains the obsolete service address. No metrics query should target that servic
 For local development, the SDK also reads `WHITELIST_KUBERNETES_HOSTS` to allow a
 test API server; otherwise it uses in-cluster `KUBERNETES_SERVICE_HOST` and
 `KUBERNETES_SERVICE_PORT`. No Kubernetes host whitelist is enabled by the Chart.
+
+The published Sealos UI package targets Tailwind 3. AppLaunchpad keeps its Tailwind 4 entrypoint and existing theme tokens in `applaunchpad/src/styles/sealos-ui.css` and `sealos-ui-theme.css`, scanning the installed UI package for component classes. The application-owned quota dialog adapter reuses host configuration while rendering the published Shared SDK view.
