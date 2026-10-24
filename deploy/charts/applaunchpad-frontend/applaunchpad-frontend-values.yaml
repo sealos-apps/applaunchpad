@@ -1,0 +1,23 @@
+# Custom values for applaunchpad frontend helm chart.
+# This file contains user-customizable configurations.
+
+replicaCount: 1
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2048Mi
+  requests:
+    cpu: 10m
+    memory: 128Mi
+# Optional capabilities (defaults remain safe for a plain cluster):
+# applaunchpadConfig:
+#   networkStorageEnabled: true
+#   imagePortsEnabled: true
+#   customPublicDomainPrefixEnabled: true
+#   nodePortHost: "node.example.com"
+#   customDomainMode: certificate
+#   customDomainCertificateSecretName: wildcard-cert
+# certificateRbac:
+#   enabled: true
+# See ../../README.md and values.yaml for all defaults and upgrade instructions.
