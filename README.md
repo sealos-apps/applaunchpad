@@ -1,19 +1,20 @@
 # AppLaunchpad
 
-AppLaunchpad sources from `labring/sealos`, separated into `main/` and
-`release-v5.1/`. Each directory contains only:
+AppLaunchpad uses one implementation in `main/` for both public and private Sealos.
+`release-v5.1` is a compatibility symlink to `main`, keeping existing build paths,
+image tags, and offline archive consumers working without maintaining a second source tree.
 
-- `applaunchpad/`: the app, server-side APIs, tests, and deployment files.
-- `packages/`: the shared packages required by that version of AppLaunchpad.
-- Root configuration files: the app's pnpm workspace and frontend build configuration.
+- `main/applaunchpad/`: application, APIs, tests, and deployment files.
+- `main/packages/`: shared workspace packages.
+- [Deployment and migration guide](main/applaunchpad/deploy/README.md): configuration,
+  legacy YAML compatibility, storage safety, upgrade and rollback instructions.
 
-The source snapshots are from Sealos `main` commit
-`83d1278086c0ba8399c08f43a69b29afb7ca2285` and `release-v5.1` commit
-`e630e042c3be23b6cca401aba4e1a980e84bea50`.
+Run `pnpm install --frozen-lockfile` in `main`, then
+`pnpm --filter applaunchpad run test:unit` and `pnpm --filter applaunchpad run build`.
 
 ## CI and OSS archives
 
-CI validates both source snapshots and publishes amd64/arm64 runtime and cluster
+CI validates the unified source and publishes amd64/arm64 runtime and cluster
 images on pushes to `main` and automatically uploads the cluster archives and their
 MD5 checksums to OSS. They are also retained as GitHub Actions artifacts for 7 days.
 
@@ -30,14 +31,14 @@ Archives are uploaded to:
 oss://<OSS_BUCKET>/ci/<snapshot>/<short-sha>/applaunchpad-cluster-<snapshot>-<short-sha>-<arch>.tar.gz
 ```
 
-Each archive has a matching `.tar.gz.md5` file. Snapshots are `main` and
-`release-v5.1`; architectures are `amd64` and `arm64`. The upload checks that both
+Each archive has a matching `.tar.gz.md5` file. Distribution channels are `main` and
+`release-v5.1` (both use the same source); architectures are `amd64` and `arm64`. The upload checks that both
 architecture archives exist and verifies their checksums before uploading.
 
 ## Version releases
 
 Push a version tag such as `v5.2.0-beta2` **after the release workflow is included
-in that commit**. The workflow validates both snapshots, builds and publishes
+in that commit**. The workflow validates the unified source, builds and publishes
 `linux/amd64` and `linux/arm64` runtime and cluster images, uploads the offline
 archives to OSS, then attaches all four archives and their four MD5 files to the
 GitHub Release. A new Release stays in draft until the uploaded SHA-256 digests
@@ -85,12 +86,11 @@ and verify the uploaded digests again. Tag runs are not cancelled by a newer run
 Workflow changes do not apply retroactively to old tags: `v5.2.0-beta1` keeps its
 manually attached SHA-named archives and must not be moved to adopt this workflow.
 
-## Currency display upgrade (both snapshots)
+## Currency display upgrade
 
 AppLaunchpad now uses `@labring/sealos-desktop-sdk@0.1.24` (installed under the
 existing `sealos-desktop-sdk` import name). The application and shared components
-resolve the same published SDK. Both snapshots no longer vendor or build a local
-SDK copy.
+resolve the same published SDK. The unified source does not vendor or build a local SDK copy.
 
 Currency symbols come from Desktop's `desktop.layout.currencySymbol` through
 `getHostConfig()`. The result is loaded once after SDK initialization and kept in

@@ -1,4 +1,5 @@
 name: AppLaunchpad Images
+# Both legacy distribution channels build the same main/ implementation.
 
 on:
   push:
@@ -51,7 +52,6 @@ jobs:
       matrix:
         snapshot:
           - main
-          - release-v5.1
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -66,7 +66,6 @@ jobs:
         working-directory: ${{ matrix.snapshot }}
         run: pnpm install --frozen-lockfile
       - name: Run AppLaunchpad unit tests
-        if: matrix.snapshot == 'main'
         working-directory: ${{ matrix.snapshot }}
         run: pnpm --filter applaunchpad run test:unit
       - name: Build AppLaunchpad
