@@ -6,19 +6,17 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const chart = (snapshot) => `${snapshot}/applaunchpad/deploy/charts/applaunchpad-frontend`;
-const render = (snapshot, args = []) => execFileSync('helm', [
-  'template', 'applaunchpad-frontend', chart(snapshot), ...args
+const chart = "applaunchpad/deploy/charts/applaunchpad-frontend";
+const render = (args = []) => execFileSync('helm', [
+  'template', 'applaunchpad-frontend', chart, ...args
 ], { encoding: 'utf8' });
 
-for (const snapshot of ['main']) {
-  execFileSync('helm', ['lint', chart(snapshot)], { stdio: 'inherit' });
-  assert.doesNotMatch(render(snapshot), /currencySymbol:/);
-}
-assert.match(render('main'), /requiresIcpReg:\s+false/);
+execFileSync('helm', ['lint', chart], { stdio: 'inherit' });
+assert.doesNotMatch(render(), /currencySymbol:/);
+assert.match(render(), /requiresIcpReg:\s+false/);
 for (const required of [true, false]) {
   for (const legacySymbol of ['shellCoin', 'cny', 'usd']) {
-    const output = render('main', [
+    const output = render([
       '--set', `applaunchpadConfig.requiresDomainReg=${required}`,
       '--set', `applaunchpadConfig.currencySymbol=${legacySymbol}`
     ]);
@@ -42,7 +40,7 @@ read_jwt_internal() { echo test-only; }
 read_yaml_file_path() { printf '%s' "$TEST_BILLING_CURRENCY"; }
 `);
   const source = readFileSync(
-    'main/applaunchpad/deploy/applaunchpad-frontend-entrypoint.sh', 'utf8'
+    'applaunchpad/deploy/applaunchpad-frontend-entrypoint.sh', 'utf8'
   );
   // Never execute adoption or deployment; stub all configmap reads as well.
   const configPhase = source.slice(0, source.indexOf('adopt_namespaced_resource()'));
