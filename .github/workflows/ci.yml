@@ -51,15 +51,15 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
       - name: Run AppLaunchpad unit tests
-        run: pnpm --filter applaunchpad run test:unit
+        run: pnpm run test:unit
       - name: Build AppLaunchpad
-        run: pnpm --filter applaunchpad run build
+        run: pnpm run build
       - uses: azure/setup-helm@v4
         with:
           version: v3.18.0
       - name: Validate Helm chart
         env:
-          DEPLOY_DIR: applaunchpad/deploy
+          DEPLOY_DIR: deploy
         run: |
           set -euo pipefail
           helm lint "${DEPLOY_DIR}/charts/applaunchpad-frontend"
@@ -202,7 +202,7 @@ jobs:
       - name: Login Sealos to GHCR
         run: sudo sealos login -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}" ghcr.io
       - name: Build, publish, and archive cluster image
-        working-directory: applaunchpad/deploy
+        working-directory: deploy
         env:
           ARCH: ${{ matrix.arch }}
           IMAGE_TAG: ${{ needs.release-metadata.outputs.image_tag }}

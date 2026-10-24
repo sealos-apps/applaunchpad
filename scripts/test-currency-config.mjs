@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const chart = "applaunchpad/deploy/charts/applaunchpad-frontend";
+const chart = "deploy/charts/applaunchpad-frontend";
 const render = (args = []) => execFileSync('helm', [
   'template', 'applaunchpad-frontend', chart, ...args
 ], { encoding: 'utf8' });
@@ -40,7 +40,7 @@ read_jwt_internal() { echo test-only; }
 read_yaml_file_path() { printf '%s' "$TEST_BILLING_CURRENCY"; }
 `);
   const source = readFileSync(
-    'applaunchpad/deploy/applaunchpad-frontend-entrypoint.sh', 'utf8'
+    'deploy/applaunchpad-frontend-entrypoint.sh', 'utf8'
   );
   // Never execute adoption or deployment; stub all configmap reads as well.
   const configPhase = source.slice(0, source.indexOf('adopt_namespaced_resource()'));

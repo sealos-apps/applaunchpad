@@ -10,7 +10,7 @@ else
 endif
 IMAGE ?= $(imageOwner)sealos-applaunchpad:$(IMAGE_TAG)
 
-.PHONY: all push-images fetch-deps build-packages build-applaunchpad dev-applaunchpad image-build-applaunchpad image-push-applaunchpad
+.PHONY: all push-images fetch-deps build-applaunchpad dev-applaunchpad image-build-applaunchpad image-push-applaunchpad
 
 all: image-build-applaunchpad
 push-images: image-push-applaunchpad
@@ -18,17 +18,13 @@ push-images: image-push-applaunchpad
 fetch-deps: pnpm-lock.yaml
 	pnpm fetch
 
-build-packages: fetch-deps
-	pnpm -r --offline --filter='./packages/*' install
-	pnpm -r --filter='./packages/*' run build
+build-applaunchpad: fetch-deps
+	pnpm --offline --frozen-lockfile install
+	pnpm run build
 
-build-applaunchpad: build-packages
-	pnpm --offline --filter=applaunchpad install
-	pnpm --filter=applaunchpad run build
-
-dev-applaunchpad: build-packages
-	pnpm --offline --filter=applaunchpad install
-	pnpm --filter=applaunchpad run dev
+dev-applaunchpad: fetch-deps
+	pnpm --offline --frozen-lockfile install
+	pnpm run dev
 
 image-build-applaunchpad:
 	docker buildx build --platform=$(PLATFORMS) -t $(IMAGE) --output=type=oci,dest=$(IMAGE_ARCHIVE) .

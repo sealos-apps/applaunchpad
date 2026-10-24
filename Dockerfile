@@ -16,75 +16,27 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 WORKDIR /app
 
-# Install dependencies only when needed
 FROM base AS deps
-
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
 RUN apk add --no-cache libc6-compat && corepack enable && corepack prepare pnpm@8.9.0 --activate
-
-
-# Install dependencies based on the preferred package manager root workspace
-COPY pnpm-lock.yaml package.json pnpm-workspace.yaml ./
-
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-  [ -f pnpm-lock.yaml ] && pnpm fetch || \
-  (echo "Lockfile not found." && exit 1)
-COPY ./tsconfig.json ./tsconfig.json
-COPY ./tsconfig.deps.json ./tsconfig.deps.json
-COPY ./tsconfig.base.json ./tsconfig.base.json
-COPY ./tsconfig.web.json ./tsconfig.web.json
-COPY ./packages ./packages
-
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-pnpm -r --offline --filter=./packages/* install \
-&& pnpm -r --filter=./packages/* run build
+COPY pnpm-lock.yaml package.json ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm fetch
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --offline --frozen-lockfile
 
 FROM deps AS builder
-
-# COPY --from=deps /app/node_modules ./node_modules
-# Next.js collects completely anonymous telemetry data about general usage.
-# Learn more here: https://nextjs.org/telemetry
-# Uncomment the following line in case you want to disable telemetry during the build.
 ENV NEXT_TELEMETRY_DISABLED=1
+COPY . .
+RUN pnpm run build
 
-# COPY --from=deps /app/packages ./packages
-
-ARG name=applaunchpad
-ARG path=applaunchpad
-
-COPY ${path} ${path}
-
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm --frozen-lockfile --filter=$name install && \
-    pnpm --filter=$name run build
-
-# Production image, copy all the files and run next
 FROM base AS runner
-
 ENV NODE_ENV=production
-# Uncomment the following line in case you want to disable telemetry during runtime.
 ENV NEXT_TELEMETRY_DISABLED=1
-
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
-# OpenSSL: https://github.com/prisma/prisma/discussions/19341#discussioncomment-11521367
-RUN apk add curl openssl ca-certificates dumb-init --no-cache \
-  && update-ca-certificates
-
-ARG name=applaunchpad
-ARG path=applaunchpad
+RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
+RUN apk add curl openssl ca-certificates dumb-init --no-cache && update-ca-certificates
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 USER nextjs
-
-# You only need to copy next.config.js if you are NOT using the default configuration
-COPY --from=builder /app/$path/next.config.js ./$path/next.config.js
-COPY --from=builder /app/$path/public ./$path/public
-COPY --from=builder --chown=nextjs:nodejs /app/$path/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/$path/.next/static ./$path/.next/static
-
 EXPOSE 3000
-
 ENV PORT=3000
-
-ENV launchpath=./${path}/server.js
-
-ENTRYPOINT ["dumb-init", "sh", "-c", "node ${launchpath}"]
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "server.js"]

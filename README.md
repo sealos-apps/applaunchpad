@@ -1,20 +1,20 @@
 # AppLaunchpad
 
-The repository root is the pnpm workspace for public and private Sealos.
+The repository root contains the AppLaunchpad application for public and private Sealos.
 
-- `applaunchpad/`: application, APIs, tests, and deployment files.
-- `packages/ui/`: local Chakra UI theme and components. Driver, analytics, shared utilities, Desktop integration, and shadcn UI use version-pinned `@labring/sealos-*` npm packages declared in `applaunchpad/package.json`.
-- `Dockerfile`, `Makefile`, `package.json`, and `pnpm-workspace.yaml`: root build entrypoints.
-- [Deployment guide](applaunchpad/deploy/README.md): configuration, storage safety,
+- `src/`, `public/`, `__tests__/`, and `deploy/`: application, assets, tests, and deployment files.
+- UI components (Chakra and shadcn), driver, analytics, shared utilities, and Desktop integration use version-pinned `@labring/sealos-*` npm packages declared in `package.json`. No local package workspace is required.
+- `Dockerfile`, `Makefile`, and `package.json`: root build entrypoints.
+- [Deployment guide](deploy/README.md): configuration, storage safety,
   upgrade and rollback instructions.
 
 Run from the repository root with Node 20.20.2 and pnpm 8.9.0:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm dev-app
-pnpm --filter applaunchpad run test:unit
-pnpm --filter applaunchpad run build
+pnpm dev
+pnpm run test:unit
+pnpm run build
 docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile -t <image> --push .
 ```
 
@@ -75,7 +75,7 @@ default from platform billing currency; operator values and explicit Helm argume
 can override it. See the deployment guide for configuration migration details.
 
 ```sh
-pnpm --filter applaunchpad run test:unit
+pnpm run test:unit
 node scripts/test-currency-config.mjs # Helm required; no cluster access or deployment
 ```
 
@@ -106,4 +106,6 @@ For local development, the SDK also reads `WHITELIST_KUBERNETES_HOSTS` to allow 
 test API server; otherwise it uses in-cluster `KUBERNETES_SERVICE_HOST` and
 `KUBERNETES_SERVICE_PORT`. No Kubernetes host whitelist is enabled by the Chart.
 
-The published Sealos UI package targets Tailwind 3. AppLaunchpad keeps its Tailwind 4 entrypoint and existing theme tokens in `applaunchpad/src/styles/sealos-ui.css` and `sealos-ui-theme.css`, scanning the installed UI package for component classes. The application-owned quota dialog adapter reuses host configuration while rendering the published Shared SDK view.
+The published Sealos UI package targets Tailwind 3. AppLaunchpad keeps its Tailwind 4 entrypoint and existing theme tokens in `src/styles/sealos-ui.css` and `sealos-ui-theme.css`, scanning the installed UI package for component classes. The application-owned quota dialog adapter reuses host configuration while rendering the published Shared SDK view.
+
+Chakra theme typings are generated from the installed `@labring/sealos-chakra-ui` package during installation. `RouteBackendSelect` remains application-owned because the route modal needs positioning and scroll-limit options not exposed by the published select.
