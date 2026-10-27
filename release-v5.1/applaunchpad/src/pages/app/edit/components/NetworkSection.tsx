@@ -44,8 +44,9 @@ import {
   validatePublicDomainPrefix
 } from '@/utils/public-domain';
 
-const CustomAccessModal = dynamic(() => import('./CustomAccessModal'));
-const CertificateCustomAccessModal = dynamic(() => import('./CertificateCustomAccessModal'));
+// UI prototype only; keep both existing backend implementations unchanged.
+const CustomAccessModal = dynamic(() => import('./DomainPrototypeModal'));
+const CertificateCustomAccessModal = dynamic(() => import('./DomainPrototypeModal'));
 
 const nanoid = customAlphabet('abcdefghijklmnopqrstuvwxyz', 12);
 
