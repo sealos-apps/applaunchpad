@@ -66,6 +66,7 @@ const MyApp = ({ Component, pageProps, config }: AppProps & AppOwnProps) => {
   });
 
   useEffect(() => {
+    if (process.env.NODE_ENV === 'development' && pageProps.storagePrototype === true) return;
     const response = createSealosApp();
     void loadHostConfig();
     (async () => {

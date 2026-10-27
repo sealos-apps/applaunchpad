@@ -1,3 +1,5 @@
+import { StorageBadge, StorageRelation } from '@/components/storage/StorageSelection';
+import type { StoragePreview } from '@/types/storage';
 import { obj2Query } from '@/api/tools';
 import { getSharePVCs } from '@/api/app';
 import { getImagePorts } from '@/api/platform';
@@ -113,8 +115,10 @@ const Form = ({
   pxVal,
   refresh,
   isAdvancedOpen,
-  onDomainVerified
+  onDomainVerified,
+  storagePreview
 }: {
+  storagePreview?: StoragePreview;
   formHook: UseFormReturn<AppEditType, any>;
   already: boolean;
   existingStores: AppEditType['storeList'];
@@ -237,13 +241,16 @@ const Form = ({
 
   // For quota calculation in fields
   const { userQuota, loadUserQuota } = useUserStore();
-  useQuery(['getUserQuota'], loadUserQuota);
+  useQuery(['getUserQuota'], loadUserQuota, { enabled: !storagePreview });
 
   // Fetch share storage PVC list
-  const { data: sharePVCList = [] } = useQuery(['getSharePVCs'], getSharePVCs);
+  const { data: sharePVCList = [] } = useQuery(['getSharePVCs'], getSharePVCs, {
+    enabled: !storagePreview
+  });
 
   const storageQuotaLeft = useMemo(() => {
     const storageQuota = userQuota?.find((item) => item.type === 'storage');
+    if (storagePreview) return 1000;
     if (!storageQuota) return 0;
 
     const newlyUsedStorage =
@@ -251,7 +258,7 @@ const Form = ({
       existingStores.reduce((sum, item) => sum + item.value, 0);
 
     return storageQuota.limit - storageQuota.used - newlyUsedStorage;
-  }, [userQuota, existingStores, storeList]);
+  }, [userQuota, existingStores, storeList, storagePreview]);
 
   // Separate local and remote stores (storeList original logic unchanged)
   const { localStores, remoteStores } = useMemo(() => {
@@ -560,14 +567,14 @@ const Form = ({
     const sortedCpuList = !!gpuType
       ? cpuList
       : cpu !== undefined
-        ? [...new Set([...cpuList, cpu])].sort((a, b) => a - b)
-        : cpuList;
+      ? [...new Set([...cpuList, cpu])].sort((a, b) => a - b)
+      : cpuList;
 
     const sortedMemoryList = !!gpuType
       ? memoryList
       : memory !== undefined
-        ? [...new Set([...memoryList, memory])].sort((a, b) => a - b)
-        : memoryList;
+      ? [...new Set([...memoryList, memory])].sort((a, b) => a - b)
+      : memoryList;
 
     const sortedEphemeralStorageList =
       ephemeralStorage !== undefined
@@ -622,13 +629,13 @@ const Form = ({
   return (
     <>
       <Grid
-        height={'100%'}
+        height={storagePreview ? 'auto' : '100%'}
         templateColumns={'220px 1fr'}
         gridGap={5}
         alignItems={'start'}
         pl={`${pxVal}px`}
       >
-        <Box>
+        <Box position={storagePreview ? 'sticky' : undefined} top={0}>
           <Tabs
             list={[
               { id: 'form', label: t('Config Form') },
@@ -636,6 +643,7 @@ const Form = ({
             ]}
             activeId={'form'}
             onChange={() =>
+              !storagePreview &&
               router.replace(
                 `/app/edit?${obj2Query({
                   name,
@@ -685,6 +693,43 @@ const Form = ({
               </Box>
             ))}
           </Box>
+          {storagePreview && (
+            <Box
+              mt={3}
+              p={4}
+              bg="white"
+              border="1px solid"
+              borderColor="gray.200"
+              borderRadius="md"
+              fontSize="sm"
+            >
+              <Box fontWeight={600} mb={3}>
+                存储概览
+              </Box>
+              <Box color="gray.500" mb={3}>
+                实例数量：{storagePreview.replicas}
+              </Box>
+              {storeList.length === 0 && <Box color="gray.500">尚未配置持久化存储</Box>}
+              {storeList.map(
+                (item) =>
+                  item.previewStorage && (
+                    <Box key={item.id} mb={3}>
+                      <Box mb={2}>{item.previewStorage.displayName}</Box>
+                      <StorageBadge option={item.previewStorage} />
+                      <Box mt={2} color="gray.500">
+                        {item.previewStorage.mode === 'shared' ? 1 : storagePreview.replicas} 份卷 ·
+                        总申请{' '}
+                        {item.value *
+                          (item.previewStorage.mode === 'shared'
+                            ? 1
+                            : storagePreview.replicas)}{' '}
+                        Gi
+                      </Box>
+                    </Box>
+                  )
+              )}
+            </Box>
+          )}
           {userSourcePrice && (
             <Box mt={3} overflow={'hidden'}>
               <QuotaBox />
@@ -1336,8 +1381,8 @@ const Form = ({
                             const valText = env.value
                               ? env.value
                               : env.valueFrom
-                                ? 'value from | ***'
-                                : '';
+                              ? 'value from | ***'
+                              : '';
                             return (
                               <tr key={env.id}>
                                 <th>{env.key}</th>
@@ -1429,7 +1474,7 @@ const Form = ({
                   <Divider my={'30px'} borderColor={'#EFF0F1'} />
 
                   {/* Local Storage Section */}
-                  <Box className="driver-deploy-storage">
+                  <Box className="driver-deploy-storage" id="settings-storage">
                     <Flex alignItems={'center'} mb={'10px'}>
                       <Label className={styles.formSecondTitle} m={0}>
                         {t('Local Storage')}
@@ -1448,9 +1493,29 @@ const Form = ({
                         ml={4}
                         icon={<InfoOutlineIcon />}
                         size="sm"
-                        text={t('Data cannot be communicated between multiple instances')}
+                        text={
+                          storagePreview
+                            ? '共享仅限同一应用多个副本；独占为每个副本独立用卷。'
+                            : t('Data cannot be communicated between multiple instances')
+                        }
                       />
                     </Flex>
+                    {storagePreview &&
+                      existingStores.some(
+                        (item) => item.previewStorage && !item.previewStorage.visible
+                      ) && (
+                        <Box
+                          ml={`${labelWidth}px`}
+                          mt={3}
+                          p={3}
+                          bg="orange.50"
+                          color="orange.800"
+                          fontSize="sm"
+                          borderRadius="md"
+                        >
+                          当前存储类型已停止开放。已有卷与数据不受影响，保留原绑定。
+                        </Box>
+                      )}
                     <Box mt={4} pl={`${labelWidth}px`}>
                       {localStores.map((item) => {
                         const originalIndex = storeList.findIndex((s) => s.id === item.id);
@@ -1479,6 +1544,17 @@ const Form = ({
                                   fontSize={'sm'}
                                 >
                                   {item.value} Gi
+                                  {storagePreview && item.previewStorage && (
+                                    <Box mt={1} fontSize="xs">
+                                      {item.previewStorage.displayName}　
+                                      <StorageBadge option={item.previewStorage} />
+                                      {!item.previewStorage.visible && (
+                                        <Box mt={1} color="orange.700">
+                                          已停止开放 · 当前使用
+                                        </Box>
+                                      )}
+                                    </Box>
+                                  )}
                                 </Box>
                               </Box>
                             </Flex>
@@ -1516,6 +1592,19 @@ const Form = ({
                           </Flex>
                         );
                       })}
+                      {storagePreview &&
+                        localStores.map(
+                          (item) =>
+                            item.previewStorage && (
+                              <Box key={`relation-${item.id}`} mb={4}>
+                                <StorageRelation
+                                  option={item.previewStorage}
+                                  replicas={storagePreview.replicas}
+                                  capacity={item.value}
+                                />
+                              </Box>
+                            )
+                        )}
                       {persistentVolumes.map((item) => (
                         <Flex key={item.path} _notLast={{ mb: 5 }} alignItems={'center'}>
                           <Flex
@@ -1702,6 +1791,7 @@ const Form = ({
       {storeEdit && (
         <StoreModal
           defaultValue={storeEdit}
+          storagePreview={storagePreview}
           isEditStore={!!existingStores.find((item) => storeEdit.path === item.path)}
           minValue={existingStores.find((item) => storeEdit.path === item.path)?.value ?? 1}
           maxValue={Math.floor(
@@ -1709,7 +1799,7 @@ const Form = ({
               // left quota - this one
               storageQuotaLeft + (storeList.find((item) => item.id === storeEdit.id)?.value ?? 0),
               // But not exceed the size cap
-              PVC_STORAGE_MAX
+              storagePreview ? 1000 : PVC_STORAGE_MAX
             )
           )}
           listNames={storeList
@@ -1726,7 +1816,10 @@ const Form = ({
                   path: item.id === e.id ? e.path : item.path,
                   value: item.id === e.id ? e.value : item.value,
                   storageType: item.id === e.id ? e.storageType : item.storageType,
-                  storageClassName: item.id === e.id ? e.storageClassName : item.storageClassName
+                  storageClassName: item.id === e.id ? e.storageClassName : item.storageClassName,
+                  ...(storagePreview
+                    ? { previewStorage: item.id === e.id ? e.previewStorage : item.previewStorage }
+                    : {})
                 }))
               );
             }

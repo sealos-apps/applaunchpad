@@ -21,8 +21,10 @@ const Header = ({
   yamlList,
   getFormData,
   applyCb,
-  applyBtnText
+  applyBtnText,
+  preview = false
 }: {
+  preview?: boolean;
   appName: string;
   title: string;
   yamlList: YamlItemType[];
@@ -108,6 +110,7 @@ const Header = ({
           mr={'14px'}
           minW={'140px'}
           variant={'outline'}
+          isDisabled={preview}
           onClick={handleExportYaml}
         >
           {t('Export')} Yaml

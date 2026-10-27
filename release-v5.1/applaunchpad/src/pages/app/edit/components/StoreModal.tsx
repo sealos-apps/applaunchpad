@@ -1,3 +1,5 @@
+import { StorageSelection, StorageRelation } from '@/components/storage/StorageSelection';
+import type { StorageOption, StoragePreview } from '@/types/storage';
 import React, { useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -25,6 +27,7 @@ import { MyTooltip } from '@sealos/ui';
 import { StorageType } from '@/types/app';
 
 export type StoreType = {
+  previewStorage?: StorageOption;
   id?: string;
   name: string;
   path: string;
@@ -45,8 +48,10 @@ const StoreModal = ({
   listNames,
   isEditStore,
   successCb,
-  closeCb
+  closeCb,
+  storagePreview
 }: {
+  storagePreview?: StoragePreview;
   defaultValue?: StoreType;
   minValue: number;
   maxValue: number;
@@ -60,12 +65,21 @@ const StoreModal = ({
 
   const {
     register,
+    watch,
     setValue,
     handleSubmit,
     formState: { errors }
   } = useForm({
     defaultValues: defaultValue
   });
+  const selectedStorage = watch('previewStorage');
+  const capacity = watch('value');
+  const storageUnavailable =
+    !!storagePreview &&
+    !isEditStore &&
+    (storagePreview.status !== 'ready' ||
+      !selectedStorage ||
+      !storagePreview.options.some((option) => option.id === selectedStorage.id && option.visible));
   const textMap = {
     create: {
       title: `${t('Update')} ${t('Storage')}`
@@ -86,13 +100,25 @@ const StoreModal = ({
     <>
       <Modal isOpen onClose={closeCb} lockFocusAcrossFrames={false}>
         <ModalOverlay />
-        <ModalContent>
+        <ModalContent maxW={storagePreview ? '560px' : undefined} maxH="calc(100vh - 64px)" my={8}>
           <ModalHeader>{textMap[type].title}</ModalHeader>
           <ModalCloseButton />
-          <ModalBody>
+          <ModalBody overflowY="auto">
+            {storagePreview && (
+              <StorageSelection
+                preview={storagePreview}
+                value={selectedStorage}
+                onChange={(option) => setValue('previewStorage', option)}
+                locked={isEditStore}
+              />
+            )}
             <FormControl mb={5} isInvalid={!!errors.value}>
               <Box mb={'8px'} fontSize={'14px'} fontWeight={500} color={'grayModern.900'}>
-                {t('capacity')}
+                {storagePreview
+                  ? selectedStorage?.mode === 'shared'
+                    ? '共享卷容量'
+                    : '每个副本容量'
+                  : t('capacity')}
               </Box>
               <MyTooltip
                 label={
@@ -182,11 +208,19 @@ const StoreModal = ({
                 })}
               />
             </MyFormControl>
+            {storagePreview && selectedStorage && (
+              <StorageRelation
+                option={selectedStorage}
+                replicas={storagePreview.replicas}
+                capacity={Number(capacity) || 0}
+              />
+            )}
           </ModalBody>
 
           <ModalFooter>
             <Button
               w={'88px'}
+              isDisabled={storageUnavailable}
               onClick={handleSubmit((e) => {
                 successCb({
                   id: e.id,
@@ -194,7 +228,8 @@ const StoreModal = ({
                   path: e.path,
                   value: clampValue(e.value),
                   storageType: e.storageType || 'local',
-                  storageClassName: e.storageClassName
+                  storageClassName: e.storageClassName,
+                  ...(storagePreview ? { previewStorage: e.previewStorage } : {})
                 });
               })}
             >

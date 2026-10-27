@@ -147,6 +147,7 @@ export interface AppEditType {
     subPath?: string; // compatible old key
   }[];
   storeList: {
+    previewStorage?: import('./storage').StorageOption;
     name: string;
     path: string;
     value: number;
