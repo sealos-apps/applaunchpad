@@ -1,3 +1,8 @@
+import {
+  NodePortEditorProvider,
+  nodePortKey,
+  useNodePortEditor
+} from './components/NodePortEditor';
 import { getBackendServices, postDeployApp, putApp } from '@/api/app';
 import {
   checkCustomDomainCertificateCoverage,
@@ -272,6 +277,7 @@ export const formData2DisplayYamls = (data: AppEditType) =>
 
 const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) => {
   const { t } = useTranslation();
+  const nodePortEditor = useNodePortEditor();
   const formOldYamls = useRef<YamlItemType[]>([]);
   const crOldYamls = useRef<DeployKindsType[]>([]);
   const oldAppEditData = useRef<AppEditType>();
@@ -798,6 +804,45 @@ const EditApp = ({ appName, tabType }: { appName?: string; tabType: string }) =>
           getFormData={() => realTimeForm.current}
           applyBtnText={applyBtnText}
           applyCb={() => {
+            // Port edits are a frontend preview only. Return before any API validation or deployment.
+            const portChanges = formHook
+              .getValues('networks')
+              .filter(
+                (network) =>
+                  network.openNodePort && nodePortEditor.drafts[nodePortKey(network)] !== undefined
+              );
+            if (portChanges.length > 0) {
+              const errors: Record<string, string> = {};
+              const changes: Record<string, string> = {};
+              portChanges.forEach((network) => {
+                const key = nodePortKey(network);
+                const value = nodePortEditor.drafts[key];
+                if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+                  errors[key] = t('node_port_editor_invalid');
+                } else {
+                  changes[key] = String(Number(value));
+                }
+              });
+              nodePortEditor.setErrors(errors);
+              if (Object.keys(errors).length > 0) return;
+              setConfirmContent(
+                t('node_port_editor_confirm', {
+                  changes: portChanges
+                    .map(
+                      (network) =>
+                        `${nodePortEditor.current(network) || t('pending_to_allocated')} → ${
+                          changes[nodePortKey(network)]
+                        }`
+                    )
+                    .join(', ')
+                })
+              );
+              openConfirm(() => {
+                nodePortEditor.saveLocally(changes);
+                toast({ title: t('Update Successful'), status: 'success' });
+              })();
+              return;
+            }
             formHook.handleSubmit(async (data) => {
               console.log('data', data);
 
@@ -1033,7 +1078,13 @@ export async function getServerSideProps(content: any) {
   };
 }
 
-export default EditApp;
+export default function EditAppPage(props: { appName?: string; tabType: string }) {
+  return (
+    <NodePortEditorProvider key={props.appName || 'create'}>
+      <EditApp {...props} />
+    </NodePortEditorProvider>
+  );
+}
 
 function checkNetworkPorts(networks: AppEditType['networks']) {
   const portProtocolSet = new Set<string>();

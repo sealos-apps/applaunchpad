@@ -470,5 +470,8 @@
   "within_1_hour": "一小时内",
   "within_5_minutes": "五分钟内",
   "proxy_detected_title": "检测到代理",
-  "proxy_detected_message": "使用代理会降低 Sealos 的性能。要禁用代理，请更新您的 DNS 提供商设置。"
+  "proxy_detected_message": "使用代理会降低 Sealos 的性能。要禁用代理，请更新您的 DNS 提供商设置。",
+  "node_port_editor_label": "对外访问端口",
+  "node_port_editor_invalid": "请输入 1–65535 范围内的整数端口。",
+  "node_port_editor_confirm": "对外访问端口：{{changes}}。变更成功后旧访问地址将失效，请同步更新外部系统的连接配置。"
 }

@@ -1,3 +1,4 @@
+import { NodePortEditor } from './NodePortEditor';
 import MyIcon from '@/components/Icon';
 import { checkPublicDomain } from '@/api/platform';
 import { MySelect } from '@sealos/ui';
@@ -1236,6 +1237,14 @@ export function NetworkSection({
                                       </Box>
                                     </Tooltip>
                                   </>
+                                ) : network.openNodePort ? (
+                                  <NodePortEditor
+                                    network={network}
+                                    host={nodePortHost}
+                                    onCopy={(nodePort) =>
+                                      copyData(getDomainDisplay({ ...network, nodePort }))
+                                    }
+                                  />
                                 ) : (
                                   <Tooltip label={t('click_to_copy_tooltip')}>
                                     <Box

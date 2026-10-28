@@ -470,5 +470,8 @@
   "within_1_hour": "Within 1 hour",
   "within_5_minutes": "Within 5 minutes",
   "proxy_detected_title": "Proxy Detected",
-  "proxy_detected_message": "Using the proxy will degrade the performance of Sealos. To disable the proxy, update your DNS provider."
+  "proxy_detected_message": "Using the proxy will degrade the performance of Sealos. To disable the proxy, update your DNS provider.",
+  "node_port_editor_label": "External port",
+  "node_port_editor_invalid": "Enter an integer port between 1 and 65535.",
+  "node_port_editor_confirm": "External port: {{changes}}. The previous address will stop working after the change. Update the connection settings in external systems."
 }

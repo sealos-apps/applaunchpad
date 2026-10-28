@@ -7,8 +7,7 @@
     "dev-app": "pnpm -r --filter ./applaunchpad  run dev",
     "gen:theme-typings": "pnpm chakra-cli tokens packages/ui/src/theme/theme.ts --out node_modules/.pnpm/node_modules/@chakra-ui/styled-system/dist/theming.types.d.ts",
     "postinstall": "pnpm run gen:theme-typings && pnpm run build-packages",
-    "build-packages": "pnpm -r --filter './packages/*' run build",
-    "dev:prototype": "bash prototypes/ip-port/start.sh"
+    "build-packages": "pnpm -r --filter './packages/*' run build"
   },
   "workspaces": [
     "./packages/*",
